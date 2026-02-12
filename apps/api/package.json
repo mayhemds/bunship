@@ -34,7 +34,7 @@
     "elysia-rate-limit": "^4.0.0",
     "ioredis": "^5.3.2",
     "jose": "^5.2.0",
-    "otpauth": "^9.4.1",
+    "otpauth": "^9.5.0",
     "resend": "^3.2.0",
     "stripe": "^14.0.0"
   },
