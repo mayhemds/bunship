@@ -27,7 +27,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@libsql/client": "^0.14.0",
+    "@libsql/client": "^0.17.0",
     "@paralleldrive/cuid2": "^2.2.2",
     "drizzle-orm": "^0.45.0"
   },
