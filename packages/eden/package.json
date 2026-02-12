@@ -22,7 +22,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@elysiajs/eden": "^1.0.0"
+    "@elysiajs/eden": "^1.4.8"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
