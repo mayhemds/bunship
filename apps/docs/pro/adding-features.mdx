@@ -1,0 +1,257 @@
+---
+title: Adding Features
+description: "End-to-end guide for building new features across the stack"
+---
+
+## Overview
+
+Building a new feature in BunShip Pro touches several layers: database schema, API route, frontend page, and navigation. This guide walks through the full process using a concrete example: adding a **Projects** feature to organizations.
+
+## End-to-End Example: Projects
+
+### 1. Add the Database Schema
+
+Create a new schema file in `packages/database/src/schema/`:
+
+```ts
+// packages/database/src/schema/projects.ts
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { organizations } from './organizations'
+
+export const projects = sqliteTable('projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+})
+```
+
+Export it from the schema index:
+
+```ts
+// packages/database/src/schema/index.ts
+export * from './projects'
+```
+
+### 2. Run the Migration
+
+```bash
+bun run --filter @bunship/database generate
+bun run db:migrate
+```
+
+The first command generates a SQL migration file. The second applies it to your database.
+
+### 3. Add the API Route
+
+Create a new route file in `apps/api/src/routes/`:
+
+```ts
+// apps/api/src/routes/projects.ts
+import { Elysia, t } from 'elysia'
+import { db } from '@bunship/database'
+import { projects } from '@bunship/database/schema'
+import { eq } from 'drizzle-orm'
+import { nanoid } from 'nanoid'
+
+export const projectRoutes = new Elysia({ prefix: '/projects' })
+  .get('/', async ({ query }) => {
+    const orgId = query.organizationId
+    const result = await db
+      .select()
+      .from(projects)
+      .where(eq(projects.organizationId, orgId))
+
+    return { projects: result }
+  }, {
+    query: t.Object({
+      organizationId: t.String(),
+    }),
+  })
+  .post('/', async ({ body }) => {
+    const id = nanoid()
+    await db.insert(projects).values({
+      id,
+      name: body.name,
+      description: body.description,
+      organizationId: body.organizationId,
+    })
+
+    return { id }
+  }, {
+    body: t.Object({
+      name: t.String({ minLength: 1 }),
+      description: t.Optional(t.String()),
+      organizationId: t.String(),
+    }),
+  })
+```
+
+Register it in the main app:
+
+```ts
+// apps/api/src/index.ts
+import { projectRoutes } from './routes/projects'
+
+app.use(projectRoutes)
+```
+
+### 4. Add the Frontend Page
+
+Create a new route file for the org tab:
+
+```tsx
+// apps/web/src/routes/_app/organizations_.$orgId/projects.tsx
+import { createFileRoute } from '@tanstack/react-router'
+import { useState, useEffect } from 'react'
+import {
+  Button, Card, CardHeader, CardTitle, CardDescription,
+  CardContent, Table, TableHeader, TableHead, TableBody,
+  TableRow, TableCell, Skeleton,
+} from '@bunship/ui'
+import { authenticatedApi } from '../../../lib/api'
+import { toast } from 'sonner'
+
+export const Route = createFileRoute(
+  '/_app/organizations_/$orgId/projects'
+)({
+  component: ProjectsPage,
+})
+
+function ProjectsPage() {
+  const { orgId } = Route.useParams()
+  const [projects, setProjects] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      const { data, error } = await authenticatedApi.withAuth(
+        (client) => client.projects.get({
+          query: { organizationId: orgId },
+        })
+      )
+
+      if (error) {
+        toast.error('Failed to load projects')
+      } else {
+        setProjects(data.projects)
+      }
+      setLoading(false)
+    }
+    load()
+  }, [orgId])
+
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-6 w-32" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-32 w-full" />
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Projects</CardTitle>
+            <CardDescription>
+              Manage projects in this organization.
+            </CardDescription>
+          </div>
+          <Button>New Project</Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {projects.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No projects yet. Create one to get started.
+          </p>
+        ) : (
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Description</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {projects.map((project) => (
+                  <TableRow key={project.id}>
+                    <TableCell className="font-medium">
+                      {project.name}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {project.description || '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+```
+
+### 5. Add to Navigation
+
+The organization tabs are rendered in the org layout. Add your new tab to the navigation array in `apps/web/src/routes/_app/organizations_.$orgId.tsx`:
+
+```tsx
+// Add to the tabs array:
+{ label: 'Projects', href: `/organizations/${orgId}/projects` }
+```
+
+### 6. Verify
+
+1. Start the dev server: `bun dev`
+2. Navigate to an organization
+3. Click the "Projects" tab
+4. The page loads with the empty state
+5. Create a project and verify it appears in the table
+
+## Adding an Organization Tab
+
+Organization tabs follow the same pattern used for Members, Billing, API Keys, and other org features:
+
+1. Create a file in `apps/web/src/routes/_app/organizations_.$orgId/your-tab.tsx`
+2. The route path is automatically `/_app/organizations_/$orgId/your-tab`
+3. Use `Route.useParams()` to get the `orgId`
+4. Add the tab link in the org layout file
+
+The `organizations_.$orgId.tsx` layout file renders the tab bar. Add your tab to the array alongside the existing entries.
+
+## Adding a Settings Page
+
+User settings pages follow the same pattern:
+
+1. Create a file in `apps/web/src/routes/_app/settings/your-page.tsx`
+2. The route is automatically `/settings/your-page`
+3. Add a link in the settings layout file (`apps/web/src/routes/_app/settings.tsx`)
+
+The settings layout renders a sidebar navigation with links to Profile, Security, and Sessions. Add your page to that list.
+
+## Checklist
+
+When adding a feature, make sure you cover:
+
+- [ ] Database schema and migration
+- [ ] API route with request validation
+- [ ] Frontend page with loading, error, and empty states
+- [ ] Navigation link in the appropriate layout
+- [ ] Toast notifications for success and failure
+- [ ] Both light and dark mode look correct

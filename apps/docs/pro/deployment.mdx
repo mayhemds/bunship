@@ -1,0 +1,79 @@
+---
+title: Deployment
+description: "Deploy BunShip Pro to production"
+---
+
+## Overview
+
+BunShip Pro is a monorepo with two deployable apps:
+
+| App | Port | What It Is |
+| --- | ---- | ---------- |
+| `apps/api` | 3000 | Elysia REST API |
+| `apps/web` | 3001 | TanStack Start frontend |
+
+You can deploy them together on one server or separately. The frontend calls the API via environment variables, so they don't need to be co-located.
+
+## Environment Variables
+
+The frontend needs one key variable:
+
+```bash
+VITE_API_URL=https://api.yourdomain.com
+```
+
+The API environment variables are the same as the [free version](/deployment/overview).
+
+## Vercel
+
+The simplest deployment option for the frontend.
+
+<Steps>
+  <Step title="Connect your repo">
+    Connect the `bunship-pro` repository to Vercel.
+  </Step>
+
+  <Step title="Configure the frontend">
+    - **Root directory**: `apps/web`
+    - **Build command**: `bun run build`
+    - **Output directory**: `.output`
+    - Set `VITE_API_URL` in environment variables
+  </Step>
+
+  <Step title="Deploy the API separately">
+    The API can run on any platform that supports Bun or Docker: Railway, Fly.io, a VPS, or a container service. See the [API deployment guides](/deployment/overview).
+  </Step>
+</Steps>
+
+## Docker
+
+A `Dockerfile` is included for the API. For the frontend, you can build a static export or run it as a Node.js server.
+
+```bash
+# Build the API image
+docker build -t bunship-api .
+
+# Run it
+docker run -p 3000:3000 --env-file .env bunship-api
+```
+
+For the frontend, build locally and deploy the output to any static hosting (Vercel, Cloudflare Pages, Netlify), or run it with Node.js.
+
+## Domain Setup
+
+A typical production setup:
+
+| Domain | Points To |
+| ------ | --------- |
+| `app.yourdomain.com` | Frontend (Vercel or static host) |
+| `api.yourdomain.com` | API (Railway, Fly.io, Docker, VPS) |
+
+Set `VITE_API_URL=https://api.yourdomain.com` on the frontend and `APP_URL=https://app.yourdomain.com` on the API so redirects and CORS work correctly.
+
+## CORS
+
+The API is pre-configured to accept requests from the frontend origin. Update the CORS allowed origins in your `.env` when you deploy to production:
+
+```bash
+CORS_ORIGINS=https://app.yourdomain.com
+```

@@ -1,0 +1,171 @@
+---
+title: Eden Client
+description: "End-to-end type-safe API calls with Eden treaty"
+---
+
+## Overview
+
+BunShip Pro uses [Eden](https://elysiajs.com/eden/overview.html) to connect the frontend to the Elysia API. Eden generates a type-safe client from the API's type definitions -- no OpenAPI spec, no code generation, no sync step. When you add an endpoint to the API, the frontend client knows about it immediately through TypeScript inference.
+
+## Two Clients
+
+The frontend defines two Eden clients in `apps/web/src/lib/api.ts`:
+
+### `api` -- Unauthenticated
+
+For public endpoints: login, register, forgot password, health checks.
+
+```tsx
+import { api } from '../../lib/api'
+
+const { data, error } = await api.auth.login.post({
+  email: 'user@example.com',
+  password: 'securepassword',
+})
+```
+
+### `authenticatedApi` -- With Token Management
+
+For all protected endpoints. Automatically attaches the access token and refreshes it on 401 responses.
+
+```tsx
+import { authenticatedApi } from '../../lib/api'
+
+const { data, error } = await authenticatedApi.withAuth(
+  (client) => client.users.me.get()
+)
+```
+
+The `withAuth` wrapper:
+
+1. Reads the access token from `localStorage`
+2. Attaches it as a `Bearer` token in the `Authorization` header
+3. Makes the request
+4. If the API returns 401, automatically uses the refresh token to get a new access token
+5. Retries the original request with the new token
+6. If the refresh fails, redirects to `/login`
+
+## Token Storage
+
+Tokens are stored in `localStorage` via the `LocalStorageTokenStorage` class from `@bunship/eden`. This is SSR-safe -- the storage guards against `window` being undefined during server-side rendering.
+
+```
+localStorage:
+  bunship_access_token   → JWT access token
+  bunship_refresh_token  → JWT refresh token
+```
+
+On login, the auth flow stores both tokens. On logout, both are cleared.
+
+## Making API Calls
+
+### GET request
+
+```tsx
+const { data, error } = await authenticatedApi.withAuth(
+  (client) => client.organizations.get()
+)
+
+if (error) {
+  toast.error('Failed to load organizations')
+  return
+}
+
+// data is fully typed: { id: string, name: string, ... }[]
+```
+
+### POST request
+
+```tsx
+const { data, error } = await authenticatedApi.withAuth(
+  (client) => client.organizations.post({
+    name: 'My Organization',
+  })
+)
+```
+
+### Request with URL parameters
+
+For routes with dynamic parameters like `/organizations/:orgId/members`:
+
+```tsx
+const { data, error } = await authenticatedApi.withAuth(
+  (client) => client.organizations({ orgId }).members.get()
+)
+```
+
+### DELETE request
+
+```tsx
+const { error } = await authenticatedApi.withAuth(
+  (client) => client.organizations({ orgId }).members({ memberId }).delete()
+)
+```
+
+## Error Handling
+
+Every Eden call returns `{ data, error }`. The pattern used across BunShip Pro:
+
+```tsx
+try {
+  const { data, error } = await authenticatedApi.withAuth(
+    (client) => client.organizations.post({ name: orgName })
+  )
+
+  if (error) {
+    toast.error(error.value?.message || 'Something went wrong')
+    return
+  }
+
+  toast.success('Organization created')
+  // Navigate or update state with data
+} catch {
+  toast.error('Network error')
+}
+```
+
+<Info>
+The `error.value` object contains the structured error response from the API, including `message`, `code`, and sometimes `details` with field-level validation errors.
+</Info>
+
+## Adding a New API Call
+
+When you add a new endpoint to the API, using it in the frontend requires zero setup:
+
+<Steps>
+  <Step title="Add the API route">
+    Create the endpoint in `apps/api/src/routes/`. For example:
+
+    ```ts
+    // apps/api/src/routes/reports.ts
+    export const reportsRoutes = new Elysia({ prefix: '/reports' })
+      .get('/', async () => {
+        return { reports: [] }
+      })
+    ```
+  </Step>
+
+  <Step title="Call it from the frontend">
+    The Eden client picks up the new types automatically:
+
+    ```tsx
+    const { data } = await authenticatedApi.withAuth(
+      (client) => client.reports.get()
+    )
+    // data.reports is typed as the return type of your endpoint
+    ```
+
+    TypeScript autocomplete works immediately -- no build, no codegen.
+  </Step>
+</Steps>
+
+## Type Inference
+
+Eden infers request and response types directly from the Elysia route definitions. This means:
+
+- Request body types match the Elysia validation schema (via `t.Object()`)
+- Response types match the actual return value
+- URL parameters are inferred from the route path
+- If you change an API response shape, the frontend shows type errors immediately
+
+This is the core advantage over REST + fetch: the contract between frontend and API is enforced at build time.

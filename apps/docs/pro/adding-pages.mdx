@@ -1,0 +1,49 @@
+---
+title: Adding Pages
+description: "Add new routes and pages to the frontend"
+---
+
+## File-Based Routing
+
+BunShip Pro uses TanStack Start's file-based router. Each file in `apps/web/src/routes/` becomes a route. The file path determines the URL.
+
+## Adding a New Page
+
+<Steps>
+  <Step title="Create the route file">
+    Add a new `.tsx` file in the routes directory. The filename determines the URL path.
+
+    For example, a file for a "reports" page inside the app layout would go in the appropriate nested directory under `routes/`.
+  </Step>
+
+  <Step title="Use the app layout">
+    Protected pages use the app layout, which provides the sidebar, header, and breadcrumbs. Your page component renders inside the main content area.
+  </Step>
+
+  <Step title="Fetch data from the API">
+    Use the Eden client to call your API endpoints. The client is fully typed — autocomplete shows you every available endpoint, and TypeScript catches mismatches at build time.
+  </Step>
+
+  <Step title="Add navigation">
+    Add a link to your new page in the sidebar navigation config.
+  </Step>
+</Steps>
+
+## Page Patterns
+
+Every page in BunShip Pro follows the same pattern:
+
+1. **Data loading** — fetch what the page needs via Eden
+2. **Loading state** — show a skeleton while data loads
+3. **Error state** — show an error boundary if the request fails
+4. **Empty state** — show a helpful message if there's no data yet
+5. **Populated state** — render the actual content
+
+Following this pattern keeps the UX consistent as you add pages.
+
+## Tips
+
+- **Protected vs public routes**: Auth pages (login, register) are public. Everything inside the app layout requires authentication. The router handles redirects automatically.
+- **Organization context**: Pages under the org section have access to the current organization ID from the URL. The API scopes data to that org automatically.
+- **Breadcrumbs**: Update automatically based on the route path. No manual config needed.
+- **Page titles**: Set via the route's metadata. Shows in the browser tab and breadcrumbs.

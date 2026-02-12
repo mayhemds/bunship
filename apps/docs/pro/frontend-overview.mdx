@@ -1,0 +1,135 @@
+---
+title: Frontend Architecture
+description: "How the TanStack Start + React frontend is structured"
+---
+
+## Stack
+
+The BunShip Pro frontend runs on:
+
+| Technology | Role |
+| ---------- | ---- |
+| **TanStack Start** | Framework (file-based routing, SSR-capable) |
+| **React** | UI rendering |
+| **Vite** | Build tool and dev server |
+| **Tailwind CSS** | Styling |
+| **shadcn/ui** | Component library (via `@bunship/ui`) |
+| **Eden** | Type-safe API client (via `@bunship/eden`) |
+
+The frontend lives in `apps/web/` and runs on port `3001` during development. The API lives in `apps/api/` on port `3000`. Both start with a single `bun dev` command from the monorepo root.
+
+## Project Structure
+
+```
+apps/web/src/
+├── routes/              # File-based routing (TanStack Router)
+│   ├── __root.tsx       # Root layout (providers, Toaster, global styles)
+│   ├── index.tsx        # Landing redirect
+│   ├── _auth.tsx        # Auth layout (login, register, etc.)
+│   ├── _auth/
+│   │   ├── login.tsx
+│   │   ├── register.tsx
+│   │   ├── forgot-password.tsx
+│   │   ├── reset-password.tsx
+│   │   └── verify-email.tsx
+│   ├── _app.tsx         # App layout (sidebar, header, protected)
+│   └── _app/
+│       ├── dashboard.tsx
+│       ├── organizations.tsx
+│       ├── organizations_.$orgId.tsx
+│       ├── organizations_.$orgId/
+│       │   ├── index.tsx
+│       │   ├── members.tsx
+│       │   ├── billing.tsx
+│       │   ├── api-keys.tsx
+│       │   ├── webhooks.tsx
+│       │   ├── files.tsx
+│       │   ├── audit-log.tsx
+│       │   └── settings.tsx
+│       ├── settings.tsx
+│       ├── settings/
+│       │   ├── index.tsx
+│       │   ├── profile.tsx
+│       │   ├── security.tsx
+│       │   └── sessions.tsx
+│       ├── admin.tsx
+│       └── admin/
+│           ├── index.tsx
+│           ├── users.tsx
+│           ├── organizations.tsx
+│           └── system.tsx
+├── components/          # Shared app components
+│   ├── sidebar.tsx
+│   ├── header.tsx
+│   ├── breadcrumbs.tsx
+│   ├── error-boundary.tsx
+│   ├── theme-provider.tsx
+│   ├── theme-toggle.tsx
+│   └── demo-banner.tsx
+└── lib/                 # Utilities and clients
+    ├── api.ts           # Eden client setup
+    ├── auth.tsx         # Auth context and hooks
+    ├── protected.tsx    # Route protection wrapper
+    └── types.ts         # Shared frontend types
+```
+
+## File-Based Routing
+
+TanStack Router maps file paths to URLs. The filename determines the route:
+
+| File | URL |
+| ---- | --- |
+| `_app/dashboard.tsx` | `/dashboard` |
+| `_app/settings/profile.tsx` | `/settings/profile` |
+| `_app/organizations_.$orgId/members.tsx` | `/organizations/:orgId/members` |
+| `_auth/login.tsx` | `/login` |
+
+Key conventions:
+
+- **`_` prefix** = layout route (renders children via `<Outlet />`), not a URL segment
+- **`$` prefix** = dynamic parameter (`$orgId` becomes `:orgId`)
+- **`_` separator** = flat nesting (`organizations_.$orgId` nests under `organizations` without creating a `/organizations/` URL prefix)
+
+## Layout System
+
+Two layout routes wrap all pages:
+
+### `_auth.tsx` -- Public Auth Layout
+
+Centered card layout with a theme toggle. Wraps login, register, forgot password, reset password, and email verification pages. No sidebar, no header.
+
+### `_app.tsx` -- Authenticated App Layout
+
+The main application shell. Provides:
+
+- **Sidebar** with navigation (Dashboard, Organizations, Settings, Admin)
+- **Header** with breadcrumbs and a mobile menu
+- **`<ProtectedRoute>`** wrapper that redirects unauthenticated users to `/login`
+- **`<ErrorBoundary>`** around the page content
+
+Every page inside `_app/` is automatically protected and wrapped in this layout.
+
+## Monorepo Connection
+
+The frontend and API are separate apps that communicate over HTTP:
+
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│   apps/web (:3001)  │  HTTP   │   apps/api (:3000)  │
+│   TanStack Start    │ ──────> │   Elysia REST API   │
+│   React + Vite      │  Eden   │   Bun runtime       │
+└─────────────────────┘         └─────────────────────┘
+         │                               │
+         ├── @bunship/ui                 ├── @bunship/database
+         ├── @bunship/eden               ├── @bunship/config
+         └── @bunship/config             ├── @bunship/emails
+                                         └── @bunship/utils
+```
+
+Shared packages live in `packages/` and are referenced by both apps via workspace dependencies. TypeScript paths resolve at build time -- no publish step needed.
+
+## Eden Type Safety
+
+The Eden client provides end-to-end type safety between frontend and API. When you add or change an API endpoint in `apps/api`, the types flow automatically to the frontend through the `@bunship/eden` package. No code generation, no sync step.
+
+See [Eden Client](/pro/eden-client) for full usage details.

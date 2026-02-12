@@ -1,0 +1,312 @@
+---
+title: Organizations
+description: "Multi-tenant organization system"
+---
+
+## Overview
+
+BunShip uses an **organization-based multi-tenancy** model. Every resource in the system -- projects, webhooks, API keys, subscriptions, audit logs -- belongs to an organization. Users access resources through their organization membership, and each membership carries a role that determines what the user can do.
+
+## Data Model
+
+Three database tables form the foundation of the multi-tenant system:
+
+<Tabs>
+  <Tab title="Organizations">
+    ```typescript
+    // packages/database/src/schema/organizations.ts
+    export const organizations = sqliteTable("organizations", {
+      id: text("id").primaryKey(),
+      name: text("name").notNull(),
+      slug: text("slug").notNull().unique(),
+      description: text("description"),
+      logoUrl: text("logo_url"),
+      settings: text("settings", { mode: "json" }).$type<{
+        branding?: { primaryColor?: string; accentColor?: string };
+        features?: { webhooks?: boolean; apiAccess?: boolean; customDomain?: boolean };
+        billing?: { email?: string; taxId?: string };
+      }>(),
+      createdBy: text("created_by").notNull().references(() => users.id),
+      createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+      updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+      deletedAt: integer("deleted_at", { mode: "timestamp" }),
+    });
+    ```
+
+    Organizations support soft deletion via `deletedAt`. All queries filter out soft-deleted organizations automatically.
+
+  </Tab>
+  <Tab title="Memberships">
+    ```typescript
+    // packages/database/src/schema/memberships.ts
+    export const memberships = sqliteTable("memberships", {
+      id: text("id").primaryKey(),
+      userId: text("user_id").notNull().references(() => users.id),
+      organizationId: text("organization_id").notNull()
+        .references(() => organizations.id),
+      role: text("role", {
+        enum: ["owner", "admin", "member", "viewer"],
+      }).notNull(),
+      createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+      updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+    });
+    ```
+
+    A unique index on `(userId, organizationId)` ensures each user has exactly one membership per organization.
+
+  </Tab>
+  <Tab title="Invitations">
+    ```typescript
+    // packages/database/src/schema/invitations.ts
+    export const invitations = sqliteTable("invitations", {
+      id: text("id").primaryKey(),
+      organizationId: text("organization_id").notNull()
+        .references(() => organizations.id),
+      email: text("email").notNull(),
+      role: text("role", {
+        enum: ["owner", "admin", "member", "viewer"],
+      }).notNull(),
+      tokenHash: text("token_hash").notNull().unique(),
+      invitedBy: text("invited_by").notNull().references(() => users.id),
+      expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+      acceptedAt: integer("accepted_at", { mode: "timestamp" }),
+      createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    });
+    ```
+
+    Invitations carry a hashed token and an expiration time. The `acceptedAt` field is set when the invitee joins.
+
+  </Tab>
+</Tabs>
+
+## Creating an Organization
+
+When a user creates an organization, they automatically become the **owner**:
+
+```typescript
+// POST /api/v1/organizations
+const { data } = await api.api.v1.organizations.post({
+  name: "Acme Corp",
+  slug: "acme-corp",
+  description: "Building the future of widgets",
+});
+
+// data.organization.id   -- the new organization ID
+// data.organization.slug -- URL-safe identifier
+```
+
+The creation process:
+
+1. Validate the name and slug (slug must be unique)
+2. Insert the organization record
+3. Create a membership with `role: "owner"` for the creating user
+4. Return the organization with the user's membership
+
+### Configuration Limits
+
+| Parameter                             | Default |
+| ------------------------------------- | ------- |
+| Allow multiple organizations per user | Yes     |
+| Max organizations per user            | 10      |
+| Require organization on signup        | No      |
+| Allow user-initiated org creation     | Yes     |
+
+These are set in `featuresConfig.organizations` and can be adjusted:
+
+```typescript
+organizations: {
+  enabled: true,
+  allowMultipleOrgs: true,
+  allowOrgCreation: true,
+  requireOrgOnSignup: false,
+  maxOrgsPerUser: 10,
+}
+```
+
+## Team Management
+
+### Inviting Members
+
+Users with the `members:invite` permission can invite new team members by email:
+
+```typescript
+// POST /api/v1/organizations/:orgId/invitations
+const { data } = await api.api.v1.organizations[":orgId"].invitations.post({
+  email: "bob@example.com",
+  role: "member",
+});
+```
+
+The invitation flow:
+
+<Steps>
+  <Step title="Send invitation">
+    An admin or owner sends an invitation specifying the email and desired role. The API generates a secure token, hashes it, and stores the invitation record.
+  </Step>
+  <Step title="Email delivered">
+    BunShip sends a transactional email with an invitation link containing the plaintext token.
+  </Step>
+  <Step title="Accept invitation">
+    The invitee clicks the link and calls the accept endpoint. If they already have an account, they are added to the organization. If not, they register first, then accept.
+
+    ```typescript
+    // POST /api/v1/invitations/accept
+    await api.api.v1.invitations.accept.post({
+      token: "invitation-token-from-email",
+    });
+    ```
+
+  </Step>
+  <Step title="Membership created">
+    A membership record is created with the role specified in the invitation. The invitation's `acceptedAt` timestamp is set.
+  </Step>
+</Steps>
+
+### Roles
+
+Every membership carries one of four roles. Roles determine what permissions the user has within the organization. See [Permissions](/concepts/permissions) for the complete permission matrix.
+
+| Role       | Description                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Owner**  | Full control. Can delete the organization, transfer ownership, and manage billing. Every org has exactly one owner.          |
+| **Admin**  | Can manage members, invitations, projects, webhooks, API keys, and view audit logs. Cannot delete the org or manage billing. |
+| **Member** | Can read organization details, view team members, and fully manage projects. No access to admin-level features.              |
+| **Viewer** | Read-only access to organization details, members list, and projects. Cannot create or modify anything.                      |
+
+### Updating Roles
+
+Users with the `members:update` permission can change another member's role:
+
+```typescript
+// PATCH /api/v1/organizations/:orgId/members/:memberId
+await api.api.v1.organizations[":orgId"].members[":memberId"].patch({
+  role: "admin",
+});
+```
+
+<Warning>
+  The owner role cannot be assigned through the role update endpoint. Use the ownership transfer
+  endpoint instead.
+</Warning>
+
+### Removing Members
+
+Users with the `members:remove` permission can remove team members:
+
+```typescript
+// DELETE /api/v1/organizations/:orgId/members/:memberId
+await api.api.v1.organizations[":orgId"].members[":memberId"].delete();
+```
+
+The organization owner cannot be removed. To change ownership, transfer it to another member first.
+
+## Organization-Scoped Data
+
+All resources in BunShip are scoped to an organization through a foreign key:
+
+```
+organizations
+├── memberships (users belong to orgs)
+├── invitations (pending team invites)
+├── subscriptions (Stripe billing)
+├── projects (your domain resources)
+├── webhooks (outgoing webhook endpoints)
+│   └── webhook_deliveries (delivery history)
+├── api_keys (integration keys)
+├── audit_logs (activity history)
+└── files (uploaded assets)
+```
+
+This scoping ensures complete data isolation between tenants. A user in Organization A can never access data belonging to Organization B, even if they have the same user account.
+
+## Organization Middleware
+
+The `organizationMiddleware` runs on every organization-scoped route. It performs two database lookups in sequence:
+
+1. **Load the organization** by the `:orgId` URL parameter, filtering out soft-deleted records
+2. **Load the user's membership** to confirm they belong to this organization
+
+```typescript
+// apps/api/src/middleware/organization.ts
+export const organizationMiddleware = new Elysia({ name: "organization" }).derive(
+  { as: "scoped" },
+  async ({ params, store, set }) => {
+    const orgId = (params as { orgId?: string }).orgId;
+    const user = (store as { user?: { id: string } }).user;
+
+    if (!user) {
+      set.status = 401;
+      throw new Error("Authentication required");
+    }
+
+    if (!orgId) {
+      set.status = 400;
+      throw new Error("Organization ID required");
+    }
+
+    const db = getDatabase();
+
+    const organization = await db.query.organizations.findFirst({
+      where: and(eq(organizations.id, orgId), isNull(organizations.deletedAt)),
+    });
+
+    if (!organization) {
+      set.status = 404;
+      throw new NotFoundError("Organization");
+    }
+
+    const membership = await db.query.memberships.findFirst({
+      where: and(eq(memberships.userId, user.id), eq(memberships.organizationId, orgId)),
+    });
+
+    if (!membership) {
+      set.status = 403;
+      throw new AuthorizationError("Not a member of this organization");
+    }
+
+    return { organization, membership };
+  }
+);
+```
+
+After this middleware runs, downstream handlers and permission middleware can access `organization` and `membership` from the context without additional database queries.
+
+## Organization Settings
+
+Each organization has a JSON `settings` column that stores optional configuration:
+
+```typescript
+settings: {
+  branding: {
+    primaryColor: "#5046E5",
+    accentColor: "#818CF8",
+  },
+  features: {
+    webhooks: true,
+    apiAccess: true,
+    customDomain: false,
+  },
+  billing: {
+    email: "billing@acme.com",
+    taxId: "US123456789",
+  },
+}
+```
+
+These settings can be used to customize the behavior of features per organization -- for example, enabling or disabling webhook access based on the organization's subscription tier.
+
+## API Endpoints
+
+| Method   | Endpoint                                       | Permission           | Description               |
+| -------- | ---------------------------------------------- | -------------------- | ------------------------- |
+| `GET`    | `/api/v1/organizations`                        | Authenticated        | List user's organizations |
+| `POST`   | `/api/v1/organizations`                        | Authenticated        | Create organization       |
+| `GET`    | `/api/v1/organizations/:orgId`                 | `org:read`           | Get organization details  |
+| `PATCH`  | `/api/v1/organizations/:orgId`                 | `org:update`         | Update organization       |
+| `DELETE` | `/api/v1/organizations/:orgId`                 | `org:delete`         | Delete organization       |
+| `GET`    | `/api/v1/organizations/:orgId/members`         | `members:read`       | List members              |
+| `PATCH`  | `/api/v1/organizations/:orgId/members/:id`     | `members:update`     | Update member role        |
+| `DELETE` | `/api/v1/organizations/:orgId/members/:id`     | `members:remove`     | Remove member             |
+| `GET`    | `/api/v1/organizations/:orgId/invitations`     | `invitations:read`   | List invitations          |
+| `POST`   | `/api/v1/organizations/:orgId/invitations`     | `invitations:create` | Send invitation           |
+| `DELETE` | `/api/v1/organizations/:orgId/invitations/:id` | `invitations:delete` | Cancel invitation         |

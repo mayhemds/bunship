@@ -1,0 +1,170 @@
+---
+title: Component Library
+description: "Pre-built UI components via shadcn/ui and @bunship/ui"
+---
+
+## Overview
+
+BunShip Pro includes a shared component library in `packages/ui/`, published as `@bunship/ui` within the monorepo. It is built on [shadcn/ui](https://ui.shadcn.com/) -- accessible, composable React components styled with Tailwind CSS.
+
+Components are not installed from npm. They live as source files in `packages/ui/src/components/`, so you can edit them directly.
+
+## Import Pattern
+
+All components are exported from the package root:
+
+```tsx
+import { Button, Card, CardHeader, CardTitle, CardContent } from '@bunship/ui'
+```
+
+The `cn` utility (for merging Tailwind classes) is also exported:
+
+```tsx
+import { cn } from '@bunship/ui'
+```
+
+## Available Components
+
+| Component | Description |
+| --------- | ----------- |
+| **Alert** | Informational banners with title and description |
+| **Avatar** | User profile images with fallback initials |
+| **Badge** | Status labels and tags |
+| **Button** | Primary action element with variants (`default`, `secondary`, `destructive`, `outline`, `ghost`, `link`) |
+| **Card** | Container with header, content, and footer sections |
+| **Checkbox** | Boolean toggle input |
+| **Dialog** | Modal overlay for confirmations and forms |
+| **DropdownMenu** | Context menus and action menus |
+| **Input** | Text input field |
+| **Label** | Form field labels |
+| **ScrollArea** | Custom scrollbar container |
+| **Select** | Dropdown selection |
+| **Separator** | Horizontal or vertical divider |
+| **Sheet** | Slide-out panel (used for mobile navigation) |
+| **Skeleton** | Loading placeholder |
+| **Sonner** | Toast notifications |
+| **Switch** | Toggle switch input |
+| **Table** | Data tables with header, body, and row components |
+| **Tabs** | Tabbed content panels |
+| **Textarea** | Multi-line text input |
+| **Tooltip** | Hover information popups |
+
+## Usage Examples
+
+### Button with variants
+
+```tsx
+import { Button } from '@bunship/ui'
+
+<Button>Default</Button>
+<Button variant="secondary">Secondary</Button>
+<Button variant="destructive">Delete</Button>
+<Button variant="outline">Cancel</Button>
+<Button variant="ghost">Ghost</Button>
+```
+
+### Card layout
+
+```tsx
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@bunship/ui'
+
+<Card>
+  <CardHeader>
+    <CardTitle>Team Members</CardTitle>
+    <CardDescription>Manage who has access to this organization.</CardDescription>
+  </CardHeader>
+  <CardContent>
+    {/* Table or list content */}
+  </CardContent>
+</Card>
+```
+
+### Dialog for confirmations
+
+```tsx
+import {
+  Dialog, DialogTrigger, DialogContent, DialogHeader,
+  DialogTitle, DialogDescription, DialogFooter,
+} from '@bunship/ui'
+
+<Dialog>
+  <DialogTrigger asChild>
+    <Button variant="destructive">Delete Organization</Button>
+  </DialogTrigger>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>Are you sure?</DialogTitle>
+      <DialogDescription>
+        This action cannot be undone. All data will be permanently deleted.
+      </DialogDescription>
+    </DialogHeader>
+    <DialogFooter>
+      <Button variant="outline">Cancel</Button>
+      <Button variant="destructive" onClick={handleDelete}>Delete</Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+```
+
+### Toast notifications
+
+```tsx
+import { toast } from 'sonner'
+
+// Success
+toast.success('Organization created')
+
+// Error
+toast.error('Failed to save changes')
+
+// With description
+toast.success('Invitation sent', {
+  description: 'They will receive an email shortly.',
+})
+```
+
+The `<Toaster />` component is already mounted in the root layout. You only need to call `toast()`.
+
+## Adding New Components
+
+To add a component from the shadcn/ui library:
+
+<Steps>
+  <Step title="Run the shadcn CLI">
+    From the monorepo root:
+
+    ```bash
+    bunx --bun shadcn@latest add [component-name] --cwd packages/ui
+    ```
+
+    For example, to add the `progress` component:
+
+    ```bash
+    bunx --bun shadcn@latest add progress --cwd packages/ui
+    ```
+  </Step>
+
+  <Step title="Export it from the package">
+    Open `packages/ui/src/index.ts` and add the export:
+
+    ```ts
+    export { Progress } from "./components/progress"
+    ```
+  </Step>
+
+  <Step title="Use it in the frontend">
+    ```tsx
+    import { Progress } from '@bunship/ui'
+
+    <Progress value={75} />
+    ```
+
+    The component is immediately available across the entire frontend -- no build step needed during development.
+  </Step>
+</Steps>
+
+## Customizing Components
+
+Every component is a source file in `packages/ui/src/components/`. You can edit them directly. For example, to change the default button border radius or padding, open `packages/ui/src/components/button.tsx` and update the Tailwind classes.
+
+Since these are your files (not node_modules), version control tracks your changes and you can diff against upstream updates.

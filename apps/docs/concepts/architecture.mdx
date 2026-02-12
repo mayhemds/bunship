@@ -1,0 +1,330 @@
+---
+title: Architecture
+description: "Understanding BunShip's monorepo architecture"
+---
+
+## Overview
+
+BunShip is a monorepo built with [Turborepo](https://turbo.build/repo) that separates concerns into **apps** (deployable services) and **packages** (shared libraries). Every package is written in TypeScript, and the entire stack runs on [Bun](https://bun.sh) for both development and production.
+
+## Monorepo Structure
+
+```
+bunship/
+├── apps/
+│   ├── api/                  # Elysia HTTP server (the main deliverable)
+│   │   ├── src/
+│   │   │   ├── index.ts      # Entry point, mounts plugins and routes
+│   │   │   ├── routes/       # Grouped route handlers
+│   │   │   ├── middleware/   # Auth, organization, permission chains
+│   │   │   ├── services/     # Business logic (no HTTP concerns)
+│   │   │   ├── lib/          # JWT, crypto, email, password utilities
+│   │   │   └── jobs/         # BullMQ background workers
+│   │   └── package.json
+│   └── docs/                  # Mintlify documentation (this site)
+│
+├── packages/
+│   ├── config/                # App, feature, billing, and permission config
+│   ├── database/              # Drizzle ORM schema, migrations, client
+│   ├── emails/                # React Email templates
+│   ├── eden/                  # Type-safe Elysia client for frontends
+│   └── utils/                 # Shared error classes, validators, helpers
+│
+├── docker/                    # Docker and Compose files
+├── turbo.json                 # Turborepo pipeline config
+└── package.json               # Workspace root
+```
+
+### Package Descriptions
+
+| Package               | Path                 | Purpose                                                                                                                                                                        |
+| --------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **@bunship/config**   | `packages/config/`   | Centralized configuration -- app settings, feature flags, billing plans, and RBAC permissions. Imported by every other package that needs runtime config.                      |
+| **@bunship/database** | `packages/database/` | Drizzle ORM schema definitions, migration scripts, and the database client factory. All tables (users, organizations, memberships, sessions, API keys, etc.) are defined here. |
+| **@bunship/utils**    | `packages/utils/`    | Shared error classes (`AuthenticationError`, `ValidationError`, `NotFoundError`), password strength validation, and general-purpose helpers.                                   |
+| **@bunship/emails**   | `packages/emails/`   | React Email templates for transactional messages: verification, password reset, team invitations, and billing notifications.                                                   |
+| **@bunship/eden**     | `packages/eden/`     | A thin wrapper around Elysia's Eden Treaty client that provides end-to-end type safety between the API and any TypeScript consumer.                                            |
+
+## Package Dependency Graph
+
+The dependency flow is intentionally one-directional. Packages at the bottom of the graph never import from packages above them.
+
+```
+  apps/api
+  ├── @bunship/config
+  ├── @bunship/database
+  │     └── @bunship/config   (for feature flags)
+  ├── @bunship/utils
+  └── @bunship/emails
+
+  apps/docs  (no runtime dependencies)
+
+  @bunship/eden
+  └── (depends on apps/api type exports only -- no runtime import)
+```
+
+<Note>
+  `@bunship/eden` depends on the API's **types**, not its runtime code. This means your frontend
+  gets full autocomplete without bundling the server.
+</Note>
+
+## Request Lifecycle
+
+Every HTTP request to the API passes through a predictable middleware chain before reaching the route handler.
+
+<Steps>
+  <Step title="Elysia receives the request">
+    Bun's HTTP server hands the request to Elysia, which parses the URL, method, headers, and body.
+  </Step>
+  <Step title="Global middleware runs">
+    CORS, rate limiting, request logging, and body size validation are applied to all routes.
+  </Step>
+  <Step title="Auth middleware resolves the user">
+    The `authMiddleware` extracts the `Bearer` token from the `Authorization` header, verifies it with `jose`, and loads the user from the database.
+
+    ```typescript
+    // apps/api/src/middleware/auth.ts
+    export const authMiddleware = new Elysia({ name: "auth" }).derive(
+      { as: "scoped" },
+      async ({ headers, set }): Promise<{ user: AuthUser }> => {
+        const authorization = headers.authorization;
+
+        if (!authorization?.startsWith("Bearer ")) {
+          set.status = 401;
+          throw new AuthenticationError(
+            "Missing or invalid authorization header"
+          );
+        }
+
+        const token = authorization.slice(7);
+        const payload = await verifyAccessToken(token);
+
+        const db = getDatabase();
+        const dbUser = await db.query.users.findFirst({
+          where: eq(users.id, payload.userId),
+        });
+
+        if (!dbUser || !dbUser.isActive) {
+          set.status = 401;
+          throw new AuthenticationError("User not found or inactive");
+        }
+
+        return {
+          user: {
+            id: dbUser.id,
+            email: dbUser.email,
+            fullName: dbUser.fullName,
+            isActive: dbUser.isActive,
+            sessionId: payload.sessionId,
+          },
+        };
+      }
+    );
+    ```
+
+  </Step>
+  <Step title="Organization middleware resolves the tenant">
+    For organization-scoped routes (`/api/v1/organizations/:orgId/*`), the `organizationMiddleware` loads the organization and the user's membership in a single pass.
+
+    ```typescript
+    // apps/api/src/middleware/organization.ts
+    const organization = await db.query.organizations.findFirst({
+      where: and(
+        eq(organizations.id, orgId),
+        isNull(organizations.deletedAt)
+      ),
+    });
+
+    const membership = await db.query.memberships.findFirst({
+      where: and(
+        eq(memberships.userId, user.id),
+        eq(memberships.organizationId, orgId)
+      ),
+    });
+    ```
+
+  </Step>
+  <Step title="Permission middleware checks RBAC">
+    `requirePermission()` or `requireRole()` verifies the user's role grants the specific permission needed for this operation.
+  </Step>
+  <Step title="Route handler executes">
+    The handler calls into a **service** function that contains the business logic. Services interact with the database through Drizzle and return plain objects.
+  </Step>
+  <Step title="Response is serialized">
+    Elysia validates the response against the route's TypeBox schema, serializes it to JSON, and sends it back to the client.
+  </Step>
+</Steps>
+
+## Key Design Decisions
+
+<AccordionGroup>
+  <Accordion title="Bun-native runtime">
+    BunShip targets Bun exclusively rather than maintaining Node.js compatibility. This unlocks Bun's native `crypto.subtle` API, the built-in SQLite driver, faster startup times, and a single tool for runtime, package management, and test execution. The trade-off is that Bun must be available in your deployment environment.
+  </Accordion>
+
+  <Accordion title="SQLite with Turso for production">
+    Instead of PostgreSQL, BunShip uses SQLite locally and [Turso](https://turso.tech) (a libSQL-based distributed SQLite service) in production. Benefits:
+
+    - Zero infrastructure for local development -- the database is a file
+    - Edge replication through Turso for global low-latency reads
+    - Simpler operational model compared to managed PostgreSQL
+    - Full SQL support through Drizzle ORM
+
+    The database schema uses integer timestamps and text-based IDs (CUID2) to stay compatible with SQLite's type system.
+
+  </Accordion>
+
+  <Accordion title="End-to-end type safety">
+    The API defines request/response schemas using Elysia's TypeBox integration. These types flow through to:
+
+    1. **Route validation** -- Elysia rejects invalid payloads at the boundary
+    2. **Service layer** -- TypeScript enforces correct data shapes
+    3. **Database** -- Drizzle infers column types from the schema
+    4. **Client** -- Eden Treaty derives client types from the server's route tree
+
+    No code generation step is needed. Types update automatically when you change a route definition.
+
+  </Accordion>
+
+  <Accordion title="Middleware composition over inheritance">
+    Elysia plugins compose using `.use()`. BunShip chains middleware as independent Elysia instances:
+
+    ```typescript
+    app
+      .use(authMiddleware)          // adds `user` to context
+      .use(organizationMiddleware)  // adds `organization` and `membership`
+      .use(requirePermission("projects:read"))
+      .get("/projects", handler)
+    ```
+
+    Each middleware reads from and writes to the shared context (`store`), keeping individual pieces testable and replaceable.
+
+  </Accordion>
+
+  <Accordion title="Configuration as code">
+    All feature flags, billing plans, role permissions, and app settings live in `@bunship/config` as typed TypeScript objects. This means:
+
+    - IDE autocomplete for every config value
+    - Compile-time errors when you reference a config key that does not exist
+    - No YAML/JSON parsing at runtime
+    - A single import (`@bunship/config`) for any package that needs configuration
+
+  </Accordion>
+</AccordionGroup>
+
+## Application Configuration
+
+The `@bunship/config` package exports four configuration modules:
+
+<Tabs>
+  <Tab title="App Config">
+    Core application settings including the API prefix, JWT expiry times, CORS origins, and rate limits.
+
+    ```typescript
+    // packages/config/src/app.ts
+    export const appConfig = {
+      name: "BunShip",
+      url: process.env.API_URL ?? "http://localhost:3000",
+      api: {
+        prefix: "/api/v1",
+        port: parseInt(process.env.PORT ?? "3000", 10),
+        rateLimit: {
+          enabled: true,
+          windowMs: 60_000,
+          maxRequests: 100,
+        },
+      },
+      jwt: {
+        accessTokenExpiry: "15m",
+        refreshTokenExpiry: "7d",
+        issuer: "bunship",
+      },
+    } as const;
+    ```
+
+  </Tab>
+  <Tab title="Features Config">
+    Feature flags for authentication methods, organization settings, billing, webhooks, API keys, audit logs, file uploads, background jobs, and caching.
+
+    ```typescript
+    // packages/config/src/features.ts
+    export const featuresConfig = {
+      auth: {
+        enableEmailPassword: true,
+        enableMagicLink: true,
+        enableGoogleOAuth: true,
+        enableGithubOAuth: true,
+        enableTwoFactor: true,
+        lockout: {
+          enabled: true,
+          maxAttempts: 5,
+          lockoutDuration: 15 * 60,
+        },
+      },
+      organizations: {
+        roles: ["owner", "admin", "member", "viewer"] as const,
+        permissions: { /* see Permissions page */ },
+      },
+      // webhooks, apiKeys, auditLogs, fileUploads, jobs, cache ...
+    } as const;
+    ```
+
+  </Tab>
+  <Tab title="Billing Config">
+    Stripe plan definitions with pricing, limits, and feature lists for Free, Pro, and Enterprise tiers.
+
+    ```typescript
+    // packages/config/src/billing.ts
+    export const billingConfig = {
+      currency: "usd",
+      plans: [
+        {
+          id: "free",
+          name: "Free",
+          price: { monthly: 0, yearly: 0 },
+          limits: { members: 2, projects: 3, apiRequests: 1000 },
+        },
+        {
+          id: "pro",
+          name: "Pro",
+          price: { monthly: 29, yearly: 290 },
+          limits: { members: 10, projects: 25, apiRequests: 100_000 },
+        },
+        {
+          id: "enterprise",
+          name: "Enterprise",
+          price: { monthly: 99, yearly: 990 },
+          limits: { members: -1, projects: -1, apiRequests: -1 },
+        },
+      ],
+    } as const;
+    ```
+
+  </Tab>
+  <Tab title="Permissions Config">
+    Role-to-permission mappings and permission utility functions. See the [Permissions](/concepts/permissions) page for full details.
+  </Tab>
+</Tabs>
+
+## Database Layer
+
+BunShip uses [Drizzle ORM](https://orm.drizzle.team) with SQLite. The schema is defined in `packages/database/src/schema/` with one file per table:
+
+| Table                 | File                    | Description                                                |
+| --------------------- | ----------------------- | ---------------------------------------------------------- |
+| `users`               | `users.ts`              | User accounts, password hashes, 2FA secrets, lockout state |
+| `sessions`            | `sessions.ts`           | Refresh token hashes, IP address, user agent, expiry       |
+| `organizations`       | `organizations.ts`      | Tenant workspaces with name, slug, settings                |
+| `memberships`         | `memberships.ts`        | User-to-organization link with role assignment             |
+| `invitations`         | `invitations.ts`        | Pending team invitations with token and expiry             |
+| `api_keys`            | `apiKeys.ts`            | Scoped API keys per organization                           |
+| `subscriptions`       | `subscriptions.ts`      | Stripe subscription state per organization                 |
+| `webhooks`            | `webhooks.ts`           | Outgoing webhook endpoint configurations                   |
+| `webhook_deliveries`  | `webhookDeliveries.ts`  | Delivery attempts and status per webhook                   |
+| `audit_logs`          | `auditLogs.ts`          | Immutable activity log entries                             |
+| `files`               | `files.ts`              | Uploaded file metadata                                     |
+| `projects`            | `projects.ts`           | Example resource table (replace with your domain)          |
+| `verification_tokens` | `verificationTokens.ts` | Email verification and password reset tokens               |
+| `backup_codes`        | `backupCodes.ts`        | Hashed 2FA recovery codes                                  |
+
+All IDs use [CUID2](https://github.com/paralleldrive/cuid2) for collision-resistant, URL-safe identifiers. Timestamps are stored as SQLite integers (Unix epoch).

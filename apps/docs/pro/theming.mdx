@@ -1,0 +1,52 @@
+---
+title: Theming
+description: "Customize colors, fonts, and dark/light mode"
+---
+
+## How Theming Works
+
+BunShip Pro uses CSS variables for theming, managed through Tailwind CSS. Every color in the UI references a variable, so changing one value updates the entire app.
+
+The theme toggle switches between light and dark mode by updating a class on the root element. All components respect this automatically.
+
+## Changing Colors
+
+Your brand colors are defined in a single CSS file. Update the variables and every button, card, badge, and link updates to match.
+
+The primary color is used for:
+- Buttons and links
+- Active states and focus rings
+- Badges and status indicators
+- Sidebar active items
+
+The destructive color is used for delete buttons, error states, and warning dialogs.
+
+## Changing Fonts
+
+The font stack is configured in one place. BunShip Pro ships with Inter for the UI. To swap it:
+
+1. Add your font (Google Fonts, local files, or a font service)
+2. Update the font family variable
+3. Adjust font weights if needed
+
+## Dark and Light Mode
+
+The theme toggle component is in the app header. It:
+
+- Persists the user's preference to `localStorage`
+- Respects the system preference on first visit
+- Applies instantly with no flash of wrong theme
+
+Both themes are designed together — dark mode is not an afterthought. Every component, every page, every state has been checked in both modes.
+
+## What You Can Customize
+
+| Element | Where |
+| ------- | ----- |
+| Brand colors | CSS variables file |
+| Font family and sizes | CSS variables file |
+| Border radius (rounded vs sharp) | CSS variables file |
+| Sidebar width | Layout component |
+| Logo | Public assets directory |
+
+The theme system uses the same approach as shadcn/ui, so any shadcn theming guide applies.

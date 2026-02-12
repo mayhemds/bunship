@@ -1,0 +1,76 @@
+---
+title: FAQ
+description: "Common questions about BunShip Pro"
+---
+
+## General
+
+<AccordionGroup>
+  <Accordion title="What's the difference between Free and Pro?">
+    The free version is the API backend — auth, billing, teams, webhooks, and everything documented on this site. Pro adds a complete frontend (`apps/web`) and a UI component library (`packages/ui`) on top of the same backend. The API code is identical.
+  </Accordion>
+
+  <Accordion title="Do I need the free version first?">
+    No. Pro is a standalone monorepo that includes the API. You don't need to clone or install the free version separately.
+  </Accordion>
+
+  <Accordion title="Can I use a different frontend framework?">
+    Yes. The API is a standalone REST API that works with any frontend. Pro happens to include TanStack Start + React, but you could replace `apps/web` with Next.js, Nuxt, SvelteKit, or anything else. The Eden client provides type safety for any TypeScript frontend.
+  </Accordion>
+
+  <Accordion title="Can I use it for multiple projects?">
+    Yes. One purchase, unlimited projects. No per-project or per-seat licensing.
+  </Accordion>
+</AccordionGroup>
+
+## Updates
+
+<AccordionGroup>
+  <Accordion title="How do I get updates?">
+    Pull from the private GitHub repo whenever you want. No expiration, no token system, no subscription to maintain.
+  </Accordion>
+
+  <Accordion title="What if the free API gets an update?">
+    We keep the API in both repos in sync. When the free version gets a fix or feature, it lands in Pro too. Pull the latest and you're up to date.
+  </Accordion>
+
+  <Accordion title="Will updates break my customizations?">
+    Updates land as new commits in the repo. If you've customized files, you handle the merge like any other Git pull. We avoid breaking changes, but if a migration is needed, it will be documented in the changelog.
+  </Accordion>
+</AccordionGroup>
+
+## Technical
+
+<AccordionGroup>
+  <Accordion title="Why TanStack Start instead of Next.js?">
+    TanStack Start runs on Vinxi and is framework-agnostic at the runtime level — it doesn't require Vercel or any specific hosting. It has file-based routing, server functions, and full React 19 support. Combined with Eden, it gives you end-to-end type safety without code generation.
+  </Accordion>
+
+  <Accordion title="Can I add more shadcn/ui components?">
+    Yes. The `packages/ui` directory is a standard shadcn/ui setup. Use the shadcn CLI to add any component from their library. It will be available across the frontend immediately.
+  </Accordion>
+
+  <Accordion title="Does the frontend work without the API running?">
+    No. The frontend calls the API for all data. Both need to be running during development (`bun dev` starts both) and in production.
+  </Accordion>
+
+  <Accordion title="How do I add a new API endpoint and use it in the frontend?">
+    Add the route in `apps/api` like normal. The Eden client picks up the new types automatically — no code generation step. Import the client in your frontend component and call the new endpoint with full autocomplete.
+  </Accordion>
+</AccordionGroup>
+
+## Billing & Access
+
+<AccordionGroup>
+  <Accordion title="Is it a subscription?">
+    No. $199 one-time payment. You get permanent repo access.
+  </Accordion>
+
+  <Accordion title="Do you offer refunds?">
+    Yes, within 14 days of purchase if you haven't used the code in a production deployment.
+  </Accordion>
+
+  <Accordion title="Can my team access the repo?">
+    The purchase includes access for one GitHub account. Team members can access the code through your organization's private fork or by sharing the cloned repo internally.
+  </Accordion>
+</AccordionGroup>

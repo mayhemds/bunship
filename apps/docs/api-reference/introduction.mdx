@@ -1,0 +1,120 @@
+---
+title: "API Reference"
+description: "Complete API documentation for BunShip"
+---
+
+## Base URL
+
+All API requests are made to:
+
+```
+https://api.bunship.com/api/v1
+```
+
+For local development:
+
+```
+http://localhost:3000/api/v1
+```
+
+## API Versioning
+
+The API is versioned through the URL path. The current version is `v1`. All endpoints are prefixed with `/api/v1`.
+
+## Authentication
+
+BunShip supports two authentication methods:
+
+### Bearer Token (JWT)
+
+Used for user-facing requests. Obtain a token pair by calling the [login endpoint](/api-reference/auth/login), then include the access token in the `Authorization` header:
+
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+```
+
+Access tokens expire after **15 minutes**. Use the [refresh endpoint](/api-reference/auth/refresh) to obtain a new token pair before expiry.
+
+### API Key
+
+Used for server-to-server integrations. Include the key in the `X-API-Key` header:
+
+```
+X-API-Key: bsk_live_abc123...
+```
+
+API keys are scoped to an organization and can have granular permission scopes. See [API Key Management](/api-reference/api-keys/manage) for details.
+
+## Request Format
+
+All request bodies must be JSON with the `Content-Type: application/json` header.
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "password123"}'
+```
+
+## Response Format
+
+All responses return JSON. Successful responses vary by endpoint. Error responses follow a consistent structure:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Validation failed",
+    "details": "Expected property 'email' to be a valid email format"
+  }
+}
+```
+
+## Status Codes
+
+| Code  | Meaning                                           |
+| ----- | ------------------------------------------------- |
+| `200` | Success                                           |
+| `201` | Resource created                                  |
+| `400` | Bad request -- invalid parameters or body         |
+| `401` | Unauthorized -- missing or invalid authentication |
+| `403` | Forbidden -- insufficient permissions             |
+| `404` | Not found -- resource does not exist              |
+| `409` | Conflict -- resource already exists               |
+| `429` | Too many requests -- rate limit exceeded          |
+| `500` | Internal server error                             |
+
+## Rate Limiting
+
+Authentication endpoints are limited to **20 requests per minute** per IP address. When exceeded, the API returns a `429` status code. Rate limit headers are included in every response:
+
+| Header                  | Description                           |
+| ----------------------- | ------------------------------------- |
+| `X-RateLimit-Limit`     | Maximum requests per window           |
+| `X-RateLimit-Remaining` | Remaining requests in current window  |
+| `X-RateLimit-Reset`     | Unix timestamp when the window resets |
+
+API key requests can have per-key rate limits configured at creation time.
+
+## Pagination
+
+List endpoints return paginated results:
+
+```json
+{
+  "data": [...],
+  "total": 42,
+  "page": 1,
+  "pageSize": 20,
+  "hasMore": true
+}
+```
+
+Use `page` and `pageSize` query parameters to navigate results. The default page size is 20, and the maximum is 100.
+
+## OpenAPI / Swagger
+
+Auto-generated interactive documentation is available at:
+
+- **Production:** `https://api.bunship.com/docs`
+- **Local:** `http://localhost:3000/docs`

@@ -1,0 +1,68 @@
+---
+title: "Update Member Role"
+api: "PATCH /api/v1/organizations/{orgId}/members/{memberId}"
+description: "Change a member's role within the organization"
+---
+
+Updates a member's role. You cannot change the owner's role (transfer ownership first) or your own role. Requires the `members:update` permission.
+
+## Auth
+
+<Note>Requires a valid Bearer token with `members:update` permission.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+<ParamField path="memberId" type="string" required>
+  Membership identifier of the member to update.
+</ParamField>
+
+## Request Body
+
+<ParamField body="role" type="string" required>
+  New role for the member. One of `"admin"`, `"member"`, or `"viewer"`. Cannot assign `"owner"` --
+  use ownership transfer instead.
+</ParamField>
+
+## Response
+
+Returns the updated member object with embedded user profile.
+
+<ResponseExample>
+```json 200
+{
+  "id": "mbr_def456",
+  "userId": "usr_xyz789ghi012345",
+  "organizationId": "org_cld2abc123def456",
+  "role": "admin",
+  "user": {
+    "id": "usr_xyz789ghi012345",
+    "email": "jane@example.com",
+    "fullName": "Jane Smith",
+    "avatarUrl": null
+  },
+  "joinedAt": "2024-02-01T14:30:00Z"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                          |
+| ------ | ---------------------- | ---------------------------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Cannot change owner role or your own role            |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                      |
+| `403`  | `AUTHORIZATION_ERROR`  | Insufficient permissions (`members:update` required) |
+| `404`  | `NOT_FOUND`            | Member not found in this organization                |
+
+## Example
+
+```bash
+curl -X PATCH https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/members/mbr_def456 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+```

@@ -1,0 +1,411 @@
+---
+title: Configuration
+description: "Customize BunShip through the config package"
+---
+
+BunShip uses a configuration-driven architecture. Instead of hunting through source code, you control most behavior by editing four files in the `packages/config/src/` directory.
+
+## Config Package Overview
+
+The `@bunship/config` package exports all shared configuration used across the monorepo.
+
+| File             | What it controls                                             |
+| ---------------- | ------------------------------------------------------------ |
+| `app.ts`         | Application name, URLs, API server settings, JWT, CORS       |
+| `features.ts`    | Feature toggles, auth behavior, org settings, webhooks, jobs |
+| `billing.ts`     | Stripe plans, pricing tiers, usage limits                    |
+| `permissions.ts` | Permission definitions, role-based access control            |
+
+Import any config value from the package:
+
+```typescript
+import { appConfig, featuresConfig, billingConfig } from "@bunship/config";
+```
+
+## Application Config
+
+The `appConfig` object in `packages/config/src/app.ts` defines your application identity and server behavior.
+
+```typescript
+export const appConfig = {
+  name: "YourSaaS",
+  description: "Your awesome SaaS product",
+  url: process.env.API_URL ?? "http://localhost:3000",
+  frontendUrl: process.env.FRONTEND_URL ?? "http://localhost:5173",
+
+  api: {
+    prefix: "/api/v1",
+    port: parseInt(process.env.PORT ?? "3000", 10),
+    host: "0.0.0.0",
+    rateLimit: {
+      enabled: true,
+      windowMs: 60 * 1000,
+      maxRequests: 100,
+    },
+    cors: {
+      enabled: true,
+      origins: ["http://localhost:5173", "https://yourdomain.com"],
+      credentials: true,
+    },
+    maxBodySize: "10mb",
+    timeout: 30000,
+  },
+
+  jwt: {
+    accessTokenExpiry: "15m",
+    refreshTokenExpiry: "7d",
+    issuer: "yoursaas",
+  },
+
+  company: {
+    name: "Your Company Inc.",
+    email: "hello@yourdomain.com",
+    supportEmail: "support@yourdomain.com",
+  },
+
+  docs: {
+    enabled: true,
+    path: "/docs",
+    title: "YourSaaS API",
+    description: "API documentation for YourSaaS",
+    version: "1.0.0",
+  },
+} as const;
+```
+
+<Tip>
+  Start by changing `name`, `description`, and `company` to match your product. These values
+  propagate to email templates, API docs, and error messages.
+</Tip>
+
+## Environment Variables
+
+All environment-specific values are read from `.env`. Copy `.env.example` to get started:
+
+```bash
+cp .env.example .env
+```
+
+### Required Variables
+
+| Variable                | Description                   | Example                              |
+| ----------------------- | ----------------------------- | ------------------------------------ |
+| `API_URL`               | Public API URL                | `https://api.yourdomain.com`         |
+| `FRONTEND_URL`          | Frontend app URL              | `https://app.yourdomain.com`         |
+| `DATABASE_URL`          | Turso database URL            | `libsql://your-db.turso.io`          |
+| `DATABASE_AUTH_TOKEN`   | Turso auth token              | `eyJ...`                             |
+| `JWT_SECRET`            | Secret for signing JWTs       | Generate with `openssl rand -hex 64` |
+| `RESEND_API_KEY`        | Resend email API key          | `re_...`                             |
+| `STRIPE_SECRET_KEY`     | Stripe secret key             | `sk_live_...`                        |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | `whsec_...`                          |
+
+### Optional Variables
+
+| Variable               | Description                     | Default                                       |
+| ---------------------- | ------------------------------- | --------------------------------------------- |
+| `PORT`                 | API server port                 | `3000`                                        |
+| `CORS_ORIGINS`         | Comma-separated allowed origins | `http://localhost:5173,http://localhost:3000` |
+| `REDIS_HOST`           | Redis host for queues and cache | `localhost`                                   |
+| `REDIS_PORT`           | Redis port                      | `6379`                                        |
+| `S3_BUCKET`            | S3 bucket for file uploads      | -                                             |
+| `S3_REGION`            | S3 region                       | -                                             |
+| `S3_ACCESS_KEY_ID`     | S3 access key                   | -                                             |
+| `S3_SECRET_ACCESS_KEY` | S3 secret key                   | -                                             |
+
+### Stripe Price IDs
+
+Each billing plan needs corresponding Stripe price IDs:
+
+```bash
+STRIPE_PRO_MONTHLY_PRICE_ID=price_1Abc...
+STRIPE_PRO_YEARLY_PRICE_ID=price_1Xyz...
+STRIPE_ENTERPRISE_MONTHLY_PRICE_ID=price_1Def...
+STRIPE_ENTERPRISE_YEARLY_PRICE_ID=price_1Ghi...
+```
+
+## Feature Flags
+
+The `featuresConfig` object in `packages/config/src/features.ts` controls which features are active and how they behave.
+
+### Authentication
+
+```typescript
+auth: {
+  enableEmailPassword: true,
+  enableMagicLink: true,
+  enableGoogleOAuth: true,
+  enableGithubOAuth: true,
+  enableTwoFactor: true,
+  enableSessionManagement: true,
+  requireEmailVerification: true,
+
+  password: {
+    minLength: 8,
+    requireUppercase: true,
+    requireLowercase: true,
+    requireNumber: true,
+    requireSpecialChar: false,
+  },
+
+  lockout: {
+    enabled: true,
+    maxAttempts: 5,
+    lockoutDuration: 15 * 60, // 15 minutes in seconds
+  },
+
+  maxSessionsPerUser: 5,
+},
+```
+
+### Organizations
+
+```typescript
+organizations: {
+  enabled: true,
+  allowMultipleOrgs: true,
+  allowOrgCreation: true,
+  requireOrgOnSignup: false,
+  maxOrgsPerUser: 10,
+  roles: ["owner", "admin", "member", "viewer"] as const,
+  defaultRole: "member" as const,
+},
+```
+
+### Disabling Features
+
+Set `enabled: false` on any feature block to turn it off entirely:
+
+```typescript
+// Turn off file uploads
+fileUploads: {
+  enabled: false,
+},
+
+// Turn off webhooks
+webhooks: {
+  enabled: false,
+},
+
+// Turn off audit logging
+auditLogs: {
+  enabled: false,
+},
+```
+
+<Warning>
+  Disabling features removes their routes from the API. Existing data in the database is not
+  affected, but the endpoints will return 404.
+</Warning>
+
+## CORS Settings
+
+CORS origins are configured in two places. The config file sets defaults, while the `CORS_ORIGINS` environment variable overrides them at runtime.
+
+```typescript
+// packages/config/src/app.ts
+api: {
+  cors: {
+    enabled: true,
+    origins: (process.env.CORS_ORIGINS ?? "http://localhost:5173,http://localhost:3000").split(","),
+    credentials: true,
+  },
+},
+```
+
+For production, set the environment variable with your actual domains:
+
+```bash
+CORS_ORIGINS=https://app.yourdomain.com,https://admin.yourdomain.com
+```
+
+To disable CORS entirely (not recommended for browser-facing APIs):
+
+```typescript
+cors: {
+  enabled: false,
+},
+```
+
+## Rate Limiting
+
+BunShip applies rate limiting at two levels.
+
+### Global Rate Limit
+
+Defined in `appConfig.api.rateLimit`, this applies to all routes:
+
+```typescript
+rateLimit: {
+  enabled: true,
+  windowMs: 60 * 1000,  // 1 minute window
+  maxRequests: 100,      // 100 requests per window per IP
+},
+```
+
+### Route-Level Rate Limit
+
+Sensitive routes like authentication have tighter limits applied directly in the route definition using the `elysia-rate-limit` plugin:
+
+```typescript
+import { rateLimit } from "elysia-rate-limit";
+
+export const authRoutes = new Elysia({ prefix: "/auth" }).use(
+  rateLimit({
+    max: 20,
+    duration: 60 * 1000,
+    scoping: "scoped",
+    generator: (req, server) => server?.requestIP(req)?.address ?? "unknown",
+  })
+);
+```
+
+### API Key Rate Limits
+
+API keys have their own rate limit defined in the features config:
+
+```typescript
+apiKeys: {
+  enabled: true,
+  maxKeysPerOrg: 10,
+  defaultRateLimit: 1000, // requests per minute
+},
+```
+
+## Billing Configuration
+
+Edit `packages/config/src/billing.ts` to define your pricing tiers. Each plan specifies a price, Stripe price IDs, usage limits, and feature descriptions.
+
+```typescript
+export const billingConfig = {
+  currency: "usd",
+  plans: [
+    {
+      id: "free",
+      name: "Free",
+      description: "For side projects and experimentation",
+      price: { monthly: 0, yearly: 0 },
+      stripePriceIds: { monthly: null, yearly: null },
+      limits: {
+        members: 2,
+        projects: 3,
+        apiRequests: 1000,
+        webhookEndpoints: 1,
+        apiKeys: 1,
+        storageGB: 0.5,
+      },
+      features: [
+        "Up to 2 team members",
+        "3 projects",
+        "1,000 API requests/month",
+        "Community support",
+      ],
+    },
+    // Add more plans...
+  ],
+};
+```
+
+<Info>
+  After modifying plans in code, you must create matching products and prices in your [Stripe
+  Dashboard](https://dashboard.stripe.com/products) and update the `stripePriceIds` with the
+  generated price IDs.
+</Info>
+
+### Helper Functions
+
+The billing config exports utility functions for checking limits:
+
+```typescript
+import { getPlan, isWithinLimit, isUnlimited } from "@bunship/config";
+
+const plan = getPlan("pro");
+if (plan && isWithinLimit(currentUsage, plan.limits.apiRequests)) {
+  // Allow the request
+}
+```
+
+## Permissions
+
+The permission system is defined in `packages/config/src/permissions.ts`. Permissions follow a `resource:action` pattern with wildcard support.
+
+```typescript
+export const permissions = {
+  "org:read": "View organization details",
+  "org:update": "Update organization settings",
+  "org:delete": "Delete organization",
+  "members:read": "View team members",
+  "members:invite": "Invite new members",
+  "members:*": "Full member management",
+  "projects:*": "Full project management",
+  "billing:*": "Full billing management",
+  // ...
+} as const;
+```
+
+### Assigning Permissions to Roles
+
+Role-permission mappings live in `featuresConfig.organizations.permissions`:
+
+```typescript
+permissions: {
+  owner: ["*"],                    // Full access to everything
+  admin: ["org:read", "org:update", "members:*", "projects:*"],
+  member: ["org:read", "members:read", "projects:*"],
+  viewer: ["org:read", "members:read", "projects:read"],
+},
+```
+
+### Wildcard Rules
+
+- `"*"` grants all permissions (used for the owner role)
+- `"resource:*"` grants all actions on a resource (e.g., `"members:*"` grants `members:read`, `members:invite`, `members:update`, `members:remove`)
+
+### Adding Custom Permissions
+
+To add permissions for a new resource:
+
+<Steps>
+  <Step title="Define the permissions">
+    Add entries to `packages/config/src/permissions.ts`:
+    ```typescript
+    "widgets:read": "View widgets",
+    "widgets:create": "Create widgets",
+    "widgets:update": "Update widgets",
+    "widgets:delete": "Delete widgets",
+    "widgets:*": "Full widget management",
+    ```
+  </Step>
+  <Step title="Assign to roles">
+    Update the role mappings in `packages/config/src/features.ts`:
+    ```typescript
+    permissions: {
+      owner: ["*"],
+      admin: [...existingPerms, "widgets:*"],
+      member: [...existingPerms, "widgets:read", "widgets:create"],
+      viewer: [...existingPerms, "widgets:read"],
+    },
+    ```
+  </Step>
+  <Step title="Enforce in routes">
+    Use the `requirePermission` middleware:
+    ```typescript
+    import { requirePermission } from "../middleware/roles";
+
+    .get("/", handler, {
+      beforeHandle: [organizationMiddleware, requirePermission("widgets:read")],
+    })
+    ```
+
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Adding Routes" icon="route" href="/customization/adding-routes">
+    Create new API endpoints with Elysia
+  </Card>
+  <Card title="Database Schema" icon="database" href="/customization/database-schema">
+    Modify and extend the database with Drizzle ORM
+  </Card>
+</CardGroup>

@@ -1,0 +1,210 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "BunShip Documentation",
+  "logo": {
+    "dark": "/logo/dark.png",
+    "light": "/logo/light.png"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#5046E5",
+    "light": "#818CF8",
+    "dark": "#4338CA",
+    "anchors": {
+      "from": "#5046E5",
+      "to": "#818CF8"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "Support",
+      "url": "mailto:support@bunship.com"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Get Started",
+    "url": "https://bunship.com"
+  },
+  "tabs": [
+    {
+      "name": "API Reference",
+      "url": "api-reference"
+    },
+    {
+      "name": "Pro",
+      "url": "pro"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/mayhemds/bunship"
+    },
+    {
+      "name": "Website",
+      "icon": "globe",
+      "url": "https://bunship.com"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": ["introduction", "quickstart", "installation"]
+    },
+    {
+      "group": "Core Concepts",
+      "pages": [
+        "concepts/architecture",
+        "concepts/authentication",
+        "concepts/organizations",
+        "concepts/permissions"
+      ]
+    },
+    {
+      "group": "Features",
+      "pages": [
+        "features/billing",
+        "features/webhooks",
+        "features/api-keys",
+        "features/audit-logs",
+        "features/file-uploads",
+        "features/background-jobs"
+      ]
+    },
+    {
+      "group": "Customization",
+      "pages": [
+        "customization/configuration",
+        "customization/adding-routes",
+        "customization/database-schema",
+        "customization/email-templates",
+        "customization/oauth-providers"
+      ]
+    },
+    {
+      "group": "Deployment",
+      "pages": [
+        "deployment/overview",
+        "deployment/docker",
+        "deployment/railway",
+        "deployment/fly-io",
+        "deployment/aws"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": ["api-reference/introduction", "api-reference/authentication"]
+    },
+    {
+      "group": "Auth",
+      "pages": [
+        "api-reference/auth/register",
+        "api-reference/auth/login",
+        "api-reference/auth/refresh",
+        "api-reference/auth/logout",
+        "api-reference/auth/forgot-password",
+        "api-reference/auth/reset-password",
+        "api-reference/auth/verify-email",
+        "api-reference/auth/two-factor"
+      ]
+    },
+    {
+      "group": "Users",
+      "pages": [
+        "api-reference/users/get-current",
+        "api-reference/users/update-profile",
+        "api-reference/users/change-password",
+        "api-reference/users/sessions"
+      ]
+    },
+    {
+      "group": "Organizations",
+      "pages": [
+        "api-reference/organizations/list",
+        "api-reference/organizations/create",
+        "api-reference/organizations/get",
+        "api-reference/organizations/update",
+        "api-reference/organizations/delete"
+      ]
+    },
+    {
+      "group": "Members",
+      "pages": [
+        "api-reference/members/list",
+        "api-reference/members/update-role",
+        "api-reference/members/remove"
+      ]
+    },
+    {
+      "group": "Invitations",
+      "pages": [
+        "api-reference/invitations/list",
+        "api-reference/invitations/send",
+        "api-reference/invitations/cancel",
+        "api-reference/invitations/accept"
+      ]
+    },
+    {
+      "group": "Billing",
+      "pages": [
+        "api-reference/billing/get-subscription",
+        "api-reference/billing/create-checkout",
+        "api-reference/billing/portal",
+        "api-reference/billing/cancel",
+        "api-reference/billing/invoices"
+      ]
+    },
+    {
+      "group": "Webhooks",
+      "pages": [
+        "api-reference/webhooks/list",
+        "api-reference/webhooks/create",
+        "api-reference/webhooks/update",
+        "api-reference/webhooks/delete",
+        "api-reference/webhooks/test",
+        "api-reference/webhooks/deliveries"
+      ]
+    },
+    {
+      "group": "API Keys",
+      "pages": [
+        "api-reference/api-keys/list",
+        "api-reference/api-keys/create",
+        "api-reference/api-keys/revoke"
+      ]
+    },
+    {
+      "group": "Pro",
+      "pages": [
+        "pro/overview",
+        "pro/quickstart",
+        "pro/frontend-overview",
+        "pro/components",
+        "pro/styling",
+        "pro/eden-client",
+        "pro/adding-features",
+        "pro/environment-variables",
+        "pro/theming",
+        "pro/adding-pages",
+        "pro/deployment",
+        "pro/faq"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "x": "https://x.com/bunshipdev",
+    "github": "https://github.com/mayhemds/bunship"
+  },
+  "api": {
+    "baseUrl": "https://api.bunship.com",
+    "auth": {
+      "method": "bearer"
+    }
+  },
+  "feedback": {
+    "thumbsRating": true,
+    "suggestEdit": true,
+    "raiseIssue": true
+  }
+}

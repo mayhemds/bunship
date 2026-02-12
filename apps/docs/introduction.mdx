@@ -1,0 +1,178 @@
+---
+title: Introduction
+description: "The fastest SaaS API boilerplate built with Bun + Elysia"
+---
+
+<img className="block dark:hidden" src="/images/hero-light.svg" alt="BunShip Hero" />
+<img className="hidden dark:block" src="/images/hero-dark.svg" alt="BunShip Hero" />
+
+## What is BunShip?
+
+BunShip is a **production-ready SaaS API boilerplate** built with [Bun](https://bun.sh) and [Elysia](https://elysiajs.com). It provides everything you need to launch your SaaS product quickly without sacrificing quality or performance.
+
+<CardGroup cols={2}>
+  <Card title="Blazing Fast" icon="bolt">
+    Built on Bun runtime, BunShip delivers 3-4x better performance than Node.js
+  </Card>
+  <Card title="Type-Safe" icon="shield-check">
+    End-to-end TypeScript with Eden client for complete type inference
+  </Card>
+  <Card title="Production Ready" icon="rocket">
+    Battle-tested patterns for authentication, billing, and multi-tenancy
+  </Card>
+  <Card title="Developer Friendly" icon="code">
+    Clean codebase, comprehensive docs, and auto-generated API documentation
+  </Card>
+</CardGroup>
+
+## Why BunShip?
+
+Building a SaaS from scratch means implementing the same features over and over:
+
+- User authentication with sessions and 2FA
+- Team management with roles and permissions
+- Stripe subscriptions with usage limits
+- Webhook systems for integrations
+- API key management
+- Audit logging
+
+**BunShip gives you all of this out of the box**, so you can focus on what makes your product unique.
+
+## Features
+
+### Authentication
+
+<AccordionGroup>
+  <Accordion title="Multiple auth methods">
+    - Email and password with secure hashing - Magic link passwordless login - Google OAuth - GitHub
+    OAuth - TOTP-based two-factor authentication
+  </Accordion>
+  <Accordion title="Security features">
+    - JWT access and refresh token rotation - Account lockout after failed attempts - Session
+    management (view and revoke) - Email verification - Password reset flow
+  </Accordion>
+</AccordionGroup>
+
+### Multi-Tenancy
+
+BunShip includes a complete multi-tenant architecture:
+
+- **Organizations** - Isolated workspaces for teams
+- **Team invitations** - Email-based invite flow
+- **Role-based access** - Owner, Admin, Member, Viewer roles
+- **Granular permissions** - Fine-grained permission system
+
+### Billing
+
+Integrated Stripe billing with:
+
+- **Subscription management** - Create, update, cancel subscriptions
+- **Usage tracking** - Monitor API requests, storage, members
+- **Pricing tiers** - Free, Pro, Enterprise plans included
+- **Customer portal** - Self-service billing management
+- **Webhook handling** - Automatic subscription status sync
+
+### Developer Experience
+
+- **Type-safe API client** - Eden client with full autocomplete
+- **OpenAPI documentation** - Auto-generated from route definitions
+- **Structured errors** - Consistent error responses
+- **Background jobs** - BullMQ for async processing
+
+## Tech Stack
+
+| Component | Technology                           |
+| --------- | ------------------------------------ |
+| Runtime   | [Bun](https://bun.sh)                |
+| Framework | [Elysia](https://elysiajs.com)       |
+| Database  | [Turso](https://turso.tech) / SQLite |
+| ORM       | [Drizzle](https://orm.drizzle.team)  |
+| Payments  | [Stripe](https://stripe.com)         |
+| Email     | [Resend](https://resend.com)         |
+| Queue     | [BullMQ](https://docs.bullmq.io)     |
+| Cache     | [Redis](https://redis.io)            |
+
+## Quick Start
+
+Get up and running in under 5 minutes:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash git clone https://github.com/bunship/bunship.git my-saas cd my-saas ```
+  </Step>
+  <Step title="Install dependencies">```bash bun install ```</Step>
+  <Step title="Configure environment">
+    ```bash cp .env.example .env # Edit .env with your configuration ```
+  </Step>
+  <Step title="Setup database">
+    ```bash bun run db:migrate bun run db:seed # Optional: adds demo data ```
+  </Step>
+  <Step title="Start development server">```bash bun dev ```</Step>
+</Steps>
+
+Your API is now running at `http://localhost:3000` with documentation at `http://localhost:3000/docs`.
+
+## Project Structure
+
+```
+bunship/
+├── apps/
+│   ├── api/                 # Main Elysia API
+│   │   ├── src/
+│   │   │   ├── routes/      # API endpoints
+│   │   │   ├── middleware/  # Auth, permissions
+│   │   │   ├── services/    # Business logic
+│   │   │   └── jobs/        # Background workers
+│   └── docs/                # This documentation
+├── packages/
+│   ├── config/              # Shared configuration
+│   ├── database/            # Drizzle schema
+│   ├── emails/              # Email templates
+│   ├── eden/                # Type-safe client
+│   └── utils/               # Shared utilities
+```
+
+## Using the Eden Client
+
+BunShip exports a type-safe API client for your frontend:
+
+```typescript
+import { createClient } from "@bunship/eden";
+
+const api = createClient("http://localhost:3000");
+
+// Full type inference and autocomplete
+const { data, error } = await api.api.v1.auth.login.post({
+  email: "user@example.com",
+  password: "password123",
+});
+
+if (data) {
+  console.log("Logged in:", data.user.email);
+  // Store tokens for authenticated requests
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation Guide" icon="download" href="/installation">
+    Detailed setup instructions for local development and production
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand how BunShip is structured
+  </Card>
+  <Card title="Authentication" icon="lock" href="/concepts/authentication">
+    Learn about the auth system
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/introduction">
+    Explore all available endpoints
+  </Card>
+</CardGroup>
+
+## Support
+
+- **Documentation** - You're reading it!
+- **GitHub Issues** - [Report bugs and request features](https://github.com/bunship/bunship/issues)
+- **Discord** - [Join the community](https://discord.gg/bunship)
+- **Email** - [support@bunship.com](mailto:support@bunship.com)

@@ -1,0 +1,107 @@
+---
+title: Quickstart
+description: "Get BunShip Pro running in under 5 minutes"
+---
+
+## Prerequisites
+
+Everything from the [free quickstart](/quickstart) applies, plus:
+
+| Requirement | Minimum Version | Purpose |
+| ----------- | --------------- | ------- |
+| **Bun** | 1.1.0+ | Runtime and package manager |
+| **Redis** | 7.0+ | Queues and caching |
+| **Node.js** | 18+ | TanStack Start dev server |
+
+<Note>
+  TanStack Start currently uses Vinxi under the hood, which requires Node.js for the dev server. Bun handles the API and all package management.
+</Note>
+
+## Setup
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone git@github.com:mayhemds/bunship-pro.git my-saas
+    cd my-saas
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    bun install
+    ```
+    This installs all workspace packages: API, frontend, database, emails, UI components, and shared utilities.
+  </Step>
+
+  <Step title="Configure environment">
+    ```bash
+    cp .env.example .env
+    ```
+
+    Open `.env` and set your keys. At minimum for local development:
+
+    ```bash
+    # Required
+    JWT_SECRET=your-secret-at-least-32-characters-long
+    JWT_REFRESH_SECRET=another-secret-at-least-32-characters
+
+    # Optional for local dev (defaults work)
+    TURSO_DATABASE_URL=file:local.db
+    ```
+
+    See the [free installation guide](/installation) for full environment variable documentation.
+  </Step>
+
+  <Step title="Run database migrations">
+    ```bash
+    bun run db:migrate
+    ```
+  </Step>
+
+  <Step title="Seed demo data (optional)">
+    ```bash
+    bun run db:seed
+    ```
+    Creates a demo user (`demo@bunship.com` / `demo123456`) with an organization and sample data.
+  </Step>
+
+  <Step title="Start development">
+    ```bash
+    bun dev
+    ```
+
+    This starts both services:
+    - **API**: http://localhost:3000
+    - **Frontend**: http://localhost:3001
+  </Step>
+</Steps>
+
+## Verify It Works
+
+1. Open http://localhost:3001 — you should see the login page
+2. If you ran the seed, log in with `demo@bunship.com` / `demo123456`
+3. You should land on the dashboard with sample data
+
+## Project Structure
+
+```
+bunship-pro/
+├── apps/
+│   ├── api/          # Elysia backend (same as free version)
+│   └── web/          # TanStack Start + React frontend
+├── packages/
+│   ├── config/       # Shared configuration
+│   ├── database/     # Drizzle schema & migrations
+│   ├── eden/         # Type-safe API client
+│   ├── emails/       # Email templates
+│   ├── ui/           # shadcn/ui component library
+│   └── utils/        # Shared utilities
+└── package.json      # Workspace root
+```
+
+## Next Steps
+
+- [Theming](/pro/theming) — Customize colors, fonts, and dark/light mode
+- [Adding Pages](/pro/adding-pages) — Add new routes to the frontend
+- [Deployment](/pro/deployment) — Deploy both API and frontend

@@ -1,0 +1,94 @@
+---
+title: "Update Profile"
+api: "PATCH /api/v1/users/me"
+description: "Update the authenticated user's profile"
+---
+
+Updates the profile information for the currently authenticated user. Only the fields included in the request body are updated; omitted fields remain unchanged. Preferences are merged with existing values.
+
+## Auth
+
+<Note>Requires a valid Bearer token.</Note>
+
+## Request Body
+
+All fields are optional. Include only the fields you want to change.
+
+<ParamField body="fullName" type="string">
+  Updated display name. Between 1 and 100 characters.
+</ParamField>
+
+<ParamField body="avatarUrl" type="string | null">
+  URL of the new avatar image, or `null` to remove.
+</ParamField>
+
+<ParamField body="preferences" type="object">
+  Partial preferences object. Merged with existing preferences.
+
+  <Expandable title="preferences properties">
+    <ParamField body="preferences.theme" type="string">
+      `"light"`, `"dark"`, or `"system"`.
+    </ParamField>
+    <ParamField body="preferences.language" type="string">
+      Language code (2-10 characters), e.g. `"en"`, `"fr"`.
+    </ParamField>
+    <ParamField body="preferences.timezone" type="string">
+      IANA timezone identifier, e.g. `"America/New_York"`.
+    </ParamField>
+    <ParamField body="preferences.notifications" type="object">
+      Notification settings with optional `email` and `push` boolean fields.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+Returns the full updated user profile. See [Get Current User](/api-reference/users/get-current) for the complete response schema.
+
+<ResponseExample>
+```json 200
+{
+  "id": "usr_cld2abc123def456",
+  "email": "user@example.com",
+  "emailVerified": "2024-01-15T10:30:00Z",
+  "fullName": "Jane Doe",
+  "avatarUrl": null,
+  "preferences": {
+    "theme": "light",
+    "language": "en",
+    "timezone": "Europe/London",
+    "notifications": {
+      "email": true,
+      "push": true
+    }
+  },
+  "twoFactorEnabled": false,
+  "isActive": true,
+  "createdAt": "2024-01-15T10:00:00Z",
+  "updatedAt": "2024-01-21T09:00:00Z"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                     |
+| ------ | ---------------------- | ------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Invalid field value             |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token |
+| `404`  | `NOT_FOUND`            | User not found                  |
+
+## Example
+
+```bash
+curl -X PATCH https://api.bunship.com/api/v1/users/me \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fullName": "Jane Doe",
+    "preferences": {
+      "theme": "light",
+      "timezone": "Europe/London"
+    }
+  }'
+```

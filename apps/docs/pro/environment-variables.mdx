@@ -1,0 +1,138 @@
+---
+title: Environment Variables
+description: "Complete reference for all configuration variables"
+---
+
+## Overview
+
+BunShip Pro reads environment variables from a `.env` file in the monorepo root. Copy the example file to get started:
+
+```bash
+cp .env.example .env
+```
+
+Both `apps/api` and `apps/web` read from this root `.env`. The frontend only has access to variables prefixed with `VITE_`.
+
+## Core
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `NODE_ENV` | No | `development` | `development`, `production`, or `test` |
+| `PORT` | No | `3000` | API server port |
+| `API_URL` | No | `http://localhost:3000` | Public URL of the API (used in emails, redirects) |
+| `FRONTEND_URL` | No | `http://localhost:5173` | Frontend URL (used for CORS and email links) |
+| `CORS_ORIGINS` | No | -- | Comma-separated allowed origins. If not set, `FRONTEND_URL` is used. |
+
+## Database
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `TURSO_DATABASE_URL` | Yes | -- | `file:local.db` for local SQLite, `libsql://your-db.turso.io` for Turso |
+| `TURSO_AUTH_TOKEN` | For remote | -- | Auth token from the Turso dashboard. Not needed for `file:` URLs. |
+
+<Warning>
+For local development, use `file:local.db` (not `file:../../local.db`). The database client resolves `file:` paths from the monorepo root, not the package directory.
+</Warning>
+
+## Authentication
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `JWT_SECRET` | Yes | -- | Secret for signing access tokens. Must be at least 32 characters. |
+| `JWT_REFRESH_SECRET` | Yes | -- | Secret for signing refresh tokens. Must be at least 32 characters and different from `JWT_SECRET`. |
+
+Generate secure values:
+
+```bash
+openssl rand -hex 32
+```
+
+<Warning>
+Both secrets must be at least 32 characters. Shorter values will cause authentication failures. Use different values for each.
+</Warning>
+
+## Stripe Billing
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `STRIPE_SECRET_KEY` | Yes | -- | Stripe API key. Use `sk_test_...` for development, `sk_live_...` for production. |
+| `STRIPE_WEBHOOK_SECRET` | Yes | -- | Webhook signing secret from the Stripe dashboard (`whsec_...`). |
+
+<Tip>
+For local development, use [Stripe CLI](https://stripe.com/docs/stripe-cli) to forward webhooks: `stripe listen --forward-to localhost:3000/stripe/webhook`
+</Tip>
+
+## Email
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `RESEND_API_KEY` | Yes | -- | API key from [Resend](https://resend.com) (`re_...`). |
+| `RESEND_FROM_EMAIL` | No | -- | Sender address for transactional emails (e.g., `noreply@yourdomain.com`). |
+
+## File Uploads (S3)
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `S3_ENDPOINT` | For files | -- | S3-compatible endpoint (e.g., `https://s3.us-east-1.amazonaws.com` or Cloudflare R2 endpoint) |
+| `S3_BUCKET` | For files | -- | Bucket name |
+| `AWS_ACCESS_KEY_ID` | For files | -- | Access key |
+| `AWS_SECRET_ACCESS_KEY` | For files | -- | Secret key |
+| `AWS_REGION` | For files | `us-east-1` | AWS region |
+
+Works with AWS S3, Cloudflare R2, MinIO, or any S3-compatible storage.
+
+## Background Jobs (Redis)
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `REDIS_URL` | For jobs | `redis://localhost:6379` | Redis connection URL for job queues |
+
+## Cron
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `CRON_SECRET` | For cron | -- | Secret token for authenticating cron endpoint requests |
+
+## Demo Mode
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `DEMO_MODE` | No | `false` | When `true`, Stripe and S3 features return mock data instead of making real API calls. Useful for demos and screenshots. |
+
+## Frontend
+
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `VITE_API_URL` | No | `http://localhost:3000` | API URL used by the frontend Eden client. Must be accessible from the browser. |
+
+<Info>
+Only variables prefixed with `VITE_` are exposed to the frontend bundle. Never put secrets in `VITE_` variables -- they are embedded in the client-side JavaScript.
+</Info>
+
+## Minimal Local Setup
+
+The smallest `.env` for local development:
+
+```bash
+JWT_SECRET=change-me-to-a-random-string-at-least-32-chars
+JWT_REFRESH_SECRET=change-me-to-a-different-random-string-32-chars
+TURSO_DATABASE_URL=file:local.db
+STRIPE_SECRET_KEY=sk_test_your_stripe_test_key
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+RESEND_API_KEY=re_your_resend_key
+```
+
+If you do not have Stripe or Resend keys yet, set `DEMO_MODE=true` to bypass those integrations during development.
+
+## Production Checklist
+
+Before deploying:
+
+- [ ] `JWT_SECRET` and `JWT_REFRESH_SECRET` are unique, random, 32+ character strings
+- [ ] `TURSO_DATABASE_URL` points to a remote Turso database (not `file:`)
+- [ ] `TURSO_AUTH_TOKEN` is set
+- [ ] `STRIPE_SECRET_KEY` uses a live key (`sk_live_...`)
+- [ ] `STRIPE_WEBHOOK_SECRET` matches your production webhook endpoint
+- [ ] `CORS_ORIGINS` includes your production frontend URL
+- [ ] `VITE_API_URL` points to your production API URL
+- [ ] `DEMO_MODE` is not set or is `false`

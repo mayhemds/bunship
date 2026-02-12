@@ -1,0 +1,176 @@
+---
+title: Styling & Theming
+description: "Tailwind CSS, CSS variables, dark mode, and design conventions"
+---
+
+## Tailwind CSS
+
+BunShip Pro uses Tailwind CSS v4 for all styling. The configuration lives in `packages/ui/src/styles/globals.css`, which is imported by the frontend app.
+
+No `tailwind.config.ts` file -- Tailwind v4 uses CSS-based configuration via `@theme` directives.
+
+## Theme Variables
+
+All colors are defined as CSS custom properties in `packages/ui/src/styles/globals.css`. The theme uses HSL values so you can adjust hue, saturation, and lightness independently.
+
+```css
+:root {
+  --radius: 0.625rem;
+  --background: 0 0% 100%;
+  --foreground: 0 0% 3.9%;
+  --primary: 0 0% 9%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 0 0% 96.1%;
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+  --accent: 0 0% 96.1%;
+  --destructive: 0 84.2% 60.2%;
+  --border: 0 0% 89.8%;
+  --ring: 0 0% 3.9%;
+}
+
+.dark {
+  --background: 0 0% 3.9%;
+  --foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  /* ... dark variants of all variables */
+}
+```
+
+Every component references these variables through Tailwind utility classes like `bg-primary`, `text-muted-foreground`, `border-border`. Change a variable, and every component updates.
+
+## Changing the Primary Color
+
+To set a brand color, update the `--primary` variable in both `:root` (light) and `.dark` (dark). Values are HSL without the `hsl()` wrapper:
+
+```css
+/* Example: Indigo primary */
+:root {
+  --primary: 239 84% 67%;
+  --primary-foreground: 0 0% 100%;
+}
+
+.dark {
+  --primary: 239 84% 67%;
+  --primary-foreground: 0 0% 100%;
+}
+```
+
+<Tip>
+Use the [shadcn/ui theme generator](https://ui.shadcn.com/themes) to create a complete color palette and copy the CSS variables directly into your globals file.
+</Tip>
+
+## Changing Fonts
+
+Fonts are defined in the `@theme` block:
+
+```css
+@theme inline {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+```
+
+To use a different font:
+
+1. Add the font via Google Fonts, a local file, or a CDN
+2. Update `--font-sans` in the `@theme` block
+3. The entire UI updates -- no per-component changes needed
+
+## Changing Border Radius
+
+The `--radius` variable controls the roundness of every component:
+
+```css
+:root {
+  --radius: 0.625rem; /* Default: slightly rounded */
+}
+```
+
+| Value | Effect |
+| ----- | ------ |
+| `0` | Sharp corners |
+| `0.375rem` | Subtle rounding |
+| `0.625rem` | Default |
+| `0.75rem` | More rounded |
+| `1rem` | Pill-like |
+
+Derived radius values (`--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-xl`) are calculated automatically.
+
+## Dark and Light Mode
+
+The theme toggle is built into the sidebar user menu. It cycles through three modes: **System**, **Light**, and **Dark**.
+
+How it works:
+
+- A `theme-provider.tsx` component wraps the app and manages the `dark` class on `<html>`
+- The user's preference is persisted in `localStorage`
+- On first visit, the system preference is used
+- No flash of incorrect theme on page load
+
+Both light and dark themes are fully designed. Every page, component, and state has been verified in both modes.
+
+## Design Conventions
+
+BunShip Pro follows consistent patterns across all pages. Use these when building new UI:
+
+### Typography
+
+| Element | Classes |
+| ------- | ------- |
+| Page heading | `text-xl font-semibold tracking-tight` |
+| Section heading | `text-lg font-semibold tracking-tight` |
+| Card description | `text-sm text-muted-foreground` |
+| Table cell text | `text-sm` |
+| Helper text | `text-xs text-muted-foreground` |
+
+### Actions
+
+| Action type | Pattern |
+| ----------- | ------- |
+| Primary action | `<Button>Save Changes</Button>` |
+| Secondary action | `<Button variant="outline">Cancel</Button>` |
+| Dangerous action | `<Button variant="destructive">Delete</Button>` |
+| Subtle action | `<Button variant="ghost" size="icon">` |
+
+### Layout
+
+| Pattern | Usage |
+| ------- | ----- |
+| `<Card>` wrapper | Every settings section, every data table |
+| `CardHeader` + `CardContent` | Standard card structure |
+| `space-y-6` | Gap between page sections |
+| `space-y-4` | Gap between form fields |
+| `flex items-center justify-between` | Header rows with title + action button |
+
+### Tables
+
+All data tables use the same structure:
+
+```tsx
+<div className="rounded-md border">
+  <Table>
+    <TableHeader>
+      <TableRow>
+        <TableHead>Name</TableHead>
+        <TableHead>Status</TableHead>
+        <TableHead className="text-right">Actions</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {items.map((item) => (
+        <TableRow key={item.id}>
+          <TableCell className="font-medium">{item.name}</TableCell>
+          <TableCell><Badge>{item.status}</Badge></TableCell>
+          <TableCell className="text-right">
+            <DropdownMenu>{/* actions */}</DropdownMenu>
+          </TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+</div>
+```
+
+The `rounded-md border` wrapper gives tables a consistent bordered container.
