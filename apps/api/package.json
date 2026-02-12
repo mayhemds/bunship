@@ -36,7 +36,7 @@
     "jose": "^5.2.0",
     "otpauth": "^9.4.1",
     "resend": "^3.2.0",
-    "stripe": "^14.0.0"
+    "stripe": "^14.25.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
