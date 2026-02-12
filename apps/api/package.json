@@ -25,7 +25,7 @@
     "@bunship/utils": "workspace:*",
     "@elysiajs/cors": "^1.0.0",
     "@elysiajs/swagger": "^1.0.0",
-    "@paralleldrive/cuid2": "^2.2.2",
+    "@paralleldrive/cuid2": "^2.3.1",
     "@sinclair/typebox": "^0.34.48",
     "bullmq": "^5.4.0",
     "drizzle-orm": "^0.45.1",
