@@ -1,0 +1,79 @@
+---
+title: "Register"
+api: "POST /api/v1/auth/register"
+description: "Create a new user account"
+---
+
+Creates a new user account and sends a verification email to confirm the email address. The account cannot be used to log in until the email is verified.
+
+## Auth
+
+None required.
+
+## Rate Limit
+
+20 requests per minute per IP.
+
+## Request Body
+
+<ParamField body="email" type="string" required>
+  User email address. Must be a valid email format, between 5 and 255 characters.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Account password. Minimum 8 characters, maximum 128 characters.
+</ParamField>
+
+<ParamField body="fullName" type="string" required>
+  User's full display name. Between 1 and 255 characters.
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseField name="userId" type="string">
+  The newly created user's ID.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Registration successful. Please check your email to verify your account.",
+  "userId": "usr_cld2abc123def456"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code               | Description                                                          |
+| ------ | ------------------ | -------------------------------------------------------------------- |
+| `400`  | `VALIDATION_ERROR` | Invalid email format, password too short, or missing required fields |
+| `409`  | `CONFLICT`         | An account with this email address already exists                    |
+
+<ResponseExample>
+```json 409
+{
+  "success": false,
+  "error": {
+    "code": "CONFLICT",
+    "message": "Email address already in use"
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecureP@ssw0rd",
+    "fullName": "John Doe"
+  }'
+```

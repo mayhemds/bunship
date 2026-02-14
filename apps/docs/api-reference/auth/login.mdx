@@ -1,0 +1,103 @@
+---
+title: "Login"
+api: "POST /api/v1/auth/login"
+description: "Authenticate with email and password"
+---
+
+Authenticates a user with email and password credentials. Returns JWT access and refresh tokens on success. If the account has two-factor authentication enabled, the `twoFactorCode` field is required.
+
+## Auth
+
+None required.
+
+## Rate Limit
+
+20 requests per minute per IP.
+
+## Request Body
+
+<ParamField body="email" type="string" required>
+  User email address.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User password.
+</ParamField>
+
+<ParamField body="twoFactorCode" type="string">
+  6-digit TOTP code from an authenticator app. Required only if 2FA is enabled on the account.
+</ParamField>
+
+## Response
+
+<ResponseField name="accessToken" type="string">
+  JWT access token. Expires in 15 minutes.
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string">
+  JWT refresh token. Expires in 7 days. Use this to obtain new token pairs.
+</ResponseField>
+
+<ResponseField name="expiresIn" type="number">
+  Access token expiry in seconds (900).
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  Authenticated user profile object.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": 900,
+  "user": {
+    "id": "usr_cld2abc123def456",
+    "email": "user@example.com",
+    "fullName": "John Doe"
+  }
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                                  |
+| ------ | ---------------------- | ------------------------------------------------------------ |
+| `401`  | `AUTHENTICATION_ERROR` | Invalid email or password, or missing 2FA code when required |
+
+<ResponseExample>
+```json 401
+{
+  "success": false,
+  "error": {
+    "code": "AUTHENTICATION_ERROR",
+    "message": "Invalid email or password"
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecureP@ssw0rd"
+  }'
+```
+
+**With 2FA:**
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecureP@ssw0rd",
+    "twoFactorCode": "123456"
+  }'
+```

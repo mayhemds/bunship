@@ -1,0 +1,75 @@
+---
+title: "List API Keys"
+api: "GET /api/v1/organizations/{orgId}/api-keys"
+description: "Get all API keys for the organization"
+---
+
+Returns all API keys for the organization. The full key value is never returned -- only the key prefix is shown for identification purposes.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="data" type="array">
+  Array of API key objects.
+
+  <Expandable title="API key properties">
+    <ResponseField name="id" type="string">API key identifier.</ResponseField>
+    <ResponseField name="name" type="string">Descriptive name.</ResponseField>
+    <ResponseField name="prefix" type="string">Key prefix for identification (e.g., `"bsk_live_abc1"`).</ResponseField>
+    <ResponseField name="scopes" type="string[]">Permission scopes. Empty array means full access.</ResponseField>
+    <ResponseField name="rateLimit" type="number | null">Per-key requests per minute limit, or `null` for default.</ResponseField>
+    <ResponseField name="lastUsedAt" type="string | null">ISO 8601 timestamp of last use.</ResponseField>
+    <ResponseField name="expiresAt" type="string | null">ISO 8601 expiration timestamp, or `null` for no expiration.</ResponseField>
+    <ResponseField name="isActive" type="boolean">Whether the key is active.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": [
+    {
+      "id": "key_abc123",
+      "name": "Production API",
+      "prefix": "bsk_live_abc1",
+      "scopes": ["members:read", "webhooks:read"],
+      "rateLimit": 1000,
+      "lastUsedAt": "2024-01-21T09:00:00Z",
+      "expiresAt": null,
+      "isActive": true,
+      "createdAt": "2024-01-15T10:00:00Z"
+    },
+    {
+      "id": "key_def456",
+      "name": "CI/CD Pipeline",
+      "prefix": "bsk_live_def4",
+      "scopes": [],
+      "rateLimit": null,
+      "lastUsedAt": "2024-01-20T03:00:00Z",
+      "expiresAt": "2024-06-15T00:00:00Z",
+      "isActive": true,
+      "createdAt": "2024-01-10T08:00:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/api-keys \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

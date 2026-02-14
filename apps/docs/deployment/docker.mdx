@@ -1,0 +1,434 @@
+---
+title: Docker
+description: "Deploy with Docker and Docker Compose"
+---
+
+BunShip includes a production-ready Docker setup with a multi-stage Dockerfile, development and production Compose files, and health checks for every service.
+
+## Dockerfile Overview
+
+The Dockerfile at `docker/Dockerfile.api` uses four stages to produce a small, secure image:
+
+| Stage       | Purpose                 | What happens                                                      |
+| ----------- | ----------------------- | ----------------------------------------------------------------- |
+| **base**    | Shared foundation       | Installs `dumb-init` on `oven/bun:1.1.38-alpine`                  |
+| **deps**    | Production dependencies | Runs `bun install --frozen-lockfile --production`                 |
+| **builder** | Compile step            | Installs all deps, copies source, runs `bun run build`            |
+| **runner**  | Final image             | Copies only production deps + built output, runs as non-root user |
+
+Key security properties of the final image:
+
+- Runs as user `bunship` (UID 1001), not root
+- Alpine base for minimal attack surface (~5 MB base layer)
+- `dumb-init` as PID 1 for proper signal handling
+- Built-in `HEALTHCHECK` against `/health`
+
+```dockerfile
+# Final stage (simplified)
+FROM oven/bun:1.1.38-alpine AS runner
+ENV NODE_ENV=production
+RUN adduser -S bunship -u 1001
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+USER bunship
+HEALTHCHECK --interval=30s --timeout=3s CMD bun fetch http://localhost:3000/health || exit 1
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["bun", "run", "apps/api/dist/index.js"]
+```
+
+## Development with Docker Compose
+
+The development Compose file (`docker/docker-compose.yml`) starts three services: the API, a background worker, and Redis.
+
+```bash
+# Build and start all services
+docker-compose -f docker/docker-compose.yml up --build
+
+# Start in the background
+docker-compose -f docker/docker-compose.yml up -d
+
+# View API logs
+docker-compose -f docker/docker-compose.yml logs -f api
+
+# Stop everything
+docker-compose -f docker/docker-compose.yml down
+```
+
+In development mode, source directories are mounted as read-only volumes so code changes reflect without rebuilding:
+
+```yaml
+volumes:
+  - ../apps/api/src:/app/apps/api/src:ro
+  - ../packages:/app/packages:ro
+```
+
+### Services
+
+<Tabs>
+  <Tab title="API">
+    Runs the Elysia API on port 3000. Depends on Redis being healthy before starting.
+
+    ```yaml
+    api:
+      build:
+        context: ..
+        dockerfile: docker/Dockerfile.api
+        target: runner
+      ports:
+        - "3000:3000"
+      env_file:
+        - ../.env
+      environment:
+        - NODE_ENV=development
+        - REDIS_HOST=redis
+        - REDIS_URL=redis://redis:6379
+      depends_on:
+        redis:
+          condition: service_healthy
+    ```
+
+  </Tab>
+  <Tab title="Worker">
+    Processes BullMQ background jobs (emails, webhooks, scheduled tasks). Uses the same Docker image as the API but with a different entrypoint command.
+
+    ```yaml
+    worker:
+      build:
+        context: ..
+        dockerfile: docker/Dockerfile.api
+        target: runner
+      env_file:
+        - ../.env
+      environment:
+        - NODE_ENV=development
+        - REDIS_HOST=redis
+        - REDIS_URL=redis://redis:6379
+      command: ["bun", "run", "apps/api/src/worker.ts"]
+      depends_on:
+        redis:
+          condition: service_healthy
+    ```
+
+  </Tab>
+  <Tab title="Redis">
+    Redis 7 on Alpine with append-only persistence, a 256 MB memory cap, and LRU eviction.
+
+    ```yaml
+    redis:
+      image: redis:7-alpine
+      ports:
+        - "6379:6379"
+      volumes:
+        - redis-data:/data
+      command: >-
+        redis-server --appendonly yes
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 10s
+        timeout: 3s
+        retries: 3
+    ```
+
+  </Tab>
+</Tabs>
+
+## Production with Docker Compose
+
+The production override file (`docker/docker-compose.prod.yml`) layers on top of the development file to add resource limits, replica counts, log rotation, and Redis authentication.
+
+```bash
+# Build the production image
+docker build -f docker/Dockerfile.api -t bunship-api:latest .
+
+# Start with production settings
+docker-compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.prod.yml \
+  up -d
+```
+
+### What changes in production
+
+| Setting         | Development            | Production                      |
+| --------------- | ---------------------- | ------------------------------- |
+| `NODE_ENV`      | development            | production                      |
+| Source mounts   | Mounted for hot reload | Removed (code baked into image) |
+| Redis auth      | No password            | `REDIS_PASSWORD` required       |
+| API replicas    | 1                      | 2 (configurable)                |
+| Resource limits | None                   | CPU and memory capped           |
+| Log rotation    | Default                | 50 MB max, 5 files              |
+| Restart policy  | `unless-stopped`       | `always`                        |
+| Rolling updates | N/A                    | Start-first with 10s delay      |
+
+### Resource Limits
+
+| Service | CPU Limit | Memory Limit | CPU Reservation | Memory Reservation |
+| ------- | --------- | ------------ | --------------- | ------------------ |
+| API     | 1.0       | 1 GB         | 0.5             | 512 MB             |
+| Worker  | 1.0       | 1 GB         | 0.5             | 512 MB             |
+| Redis   | 0.5       | 512 MB       | 0.25            | 256 MB             |
+
+Adjust these in `docker-compose.prod.yml` based on your workload.
+
+## Building and Running
+
+### Build the Image
+
+```bash
+# Standard build
+docker build -f docker/Dockerfile.api -t bunship-api:1.0.0 .
+
+# Build with BuildKit cache (faster rebuilds)
+DOCKER_BUILDKIT=1 docker build \
+  --cache-from bunship-api:latest \
+  --build-arg BUILDKIT_INLINE_CACHE=1 \
+  -f docker/Dockerfile.api \
+  -t bunship-api:1.0.0 .
+```
+
+### Run Database Migrations
+
+Run migrations before starting the application for the first time, or after schema changes:
+
+```bash
+docker run --rm \
+  --env-file .env \
+  bunship-api:1.0.0 \
+  bun run db:migrate
+```
+
+### Push to a Registry
+
+```bash
+# GitHub Container Registry
+docker tag bunship-api:1.0.0 ghcr.io/your-org/bunship-api:1.0.0
+docker push ghcr.io/your-org/bunship-api:1.0.0
+
+# AWS ECR
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com
+docker tag bunship-api:1.0.0 <account>.dkr.ecr.us-east-1.amazonaws.com/bunship-api:1.0.0
+docker push <account>.dkr.ecr.us-east-1.amazonaws.com/bunship-api:1.0.0
+```
+
+## Volume Management
+
+BunShip uses two named volumes:
+
+| Volume       | Mount Point | Purpose                                  |
+| ------------ | ----------- | ---------------------------------------- |
+| `redis-data` | `/data`     | Redis AOF persistence                    |
+| `db-data`    | `/app/data` | Local SQLite database (development only) |
+
+<Warning>
+  The `db-data` volume is only relevant when using a file-based SQLite database
+  (`TURSO_DATABASE_URL=file:../../local.db`). In production with Turso Cloud, no local database
+  volume is needed.
+</Warning>
+
+```bash
+# List volumes
+docker volume ls | grep bunship
+
+# Back up Redis data
+docker run --rm -v bunship_redis-data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/redis-backup.tar.gz -C /data .
+
+# Remove volumes (destroys data)
+docker-compose -f docker/docker-compose.yml down -v
+```
+
+## Environment Variables
+
+Pass environment variables through an `.env` file or your orchestrator's secrets system.
+
+<CodeGroup>
+
+```bash .env (development)
+NODE_ENV=development
+API_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:5173
+TURSO_DATABASE_URL=file:../../local.db
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_URL=redis://redis:6379
+JWT_SECRET=dev-secret-change-in-production-min-32
+JWT_REFRESH_SECRET=dev-refresh-secret-change-in-production
+```
+
+```bash .env.production
+NODE_ENV=production
+API_URL=https://api.yourdomain.com
+FRONTEND_URL=https://yourdomain.com
+TURSO_DATABASE_URL=libsql://your-db.turso.io
+TURSO_AUTH_TOKEN=your-turso-token
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=generated-strong-password
+REDIS_URL=redis://:generated-strong-password@redis:6379
+JWT_SECRET=generated-production-secret
+JWT_REFRESH_SECRET=generated-production-refresh-secret
+STRIPE_SECRET_KEY=sk_live_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+RESEND_API_KEY=re_xxx
+EMAIL_FROM="YourApp <noreply@yourdomain.com>"
+```
+
+</CodeGroup>
+
+Inside Docker Compose, service-level `environment` entries override values from `env_file`. The Compose files set `REDIS_HOST=redis` so the API connects to the Redis container by service name rather than `localhost`.
+
+## Scaling
+
+### Multiple API Instances
+
+Scale the API horizontally with Docker Compose:
+
+```bash
+# Run 3 API instances
+docker-compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.prod.yml \
+  up -d --scale api=3
+```
+
+When running multiple instances, place a reverse proxy (Nginx, Caddy, or Traefik) in front to distribute traffic. BunShip is stateless -- sessions are validated via JWT and jobs are coordinated through Redis -- so any instance can handle any request.
+
+<Tabs>
+  <Tab title="Caddy">
+    ```
+    api.yourdomain.com {
+        reverse_proxy bunship-api-1:3000 bunship-api-2:3000 bunship-api-3:3000 {
+            lb_policy round_robin
+            health_uri /health
+            health_interval 30s
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Nginx">
+    ```nginx
+    upstream bunship {
+        server bunship-api-1:3000;
+        server bunship-api-2:3000;
+        server bunship-api-3:3000;
+    }
+
+    server {
+        listen 443 ssl;
+        server_name api.yourdomain.com;
+
+        location / {
+            proxy_pass http://bunship;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location /health {
+            proxy_pass http://bunship;
+            access_log off;
+        }
+    }
+    ```
+
+  </Tab>
+</Tabs>
+
+### Worker Scaling
+
+Scale workers independently from the API:
+
+```bash
+docker-compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.prod.yml \
+  up -d --scale worker=2
+```
+
+BullMQ distributes jobs across worker instances automatically. Add workers when your queue depth grows or job processing time increases.
+
+## Zero-Downtime Updates
+
+The production Compose file configures rolling updates with a start-first strategy:
+
+```yaml
+deploy:
+  update_config:
+    parallelism: 1
+    delay: 10s
+    order: start-first
+  rollback_config:
+    parallelism: 1
+    delay: 5s
+```
+
+To deploy a new version:
+
+```bash
+# Pull or build the new image
+docker build -f docker/Dockerfile.api -t bunship-api:1.1.0 .
+
+# Update running services (zero downtime)
+docker-compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.prod.yml \
+  up -d --no-deps --build api
+
+# Rollback if something goes wrong
+docker-compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.prod.yml \
+  stop api
+
+docker tag bunship-api:1.0.0 bunship-api:latest
+
+docker-compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.prod.yml \
+  up -d api
+```
+
+## Troubleshooting
+
+### Container won't start
+
+```bash
+# Check logs for error output
+docker-compose -f docker/docker-compose.yml logs api
+
+# Inspect the container for config issues
+docker inspect bunship-api
+
+# Verify environment variables are set
+docker-compose -f docker/docker-compose.yml exec api env | sort
+```
+
+### Redis connection refused
+
+```bash
+# Confirm Redis is healthy
+docker-compose -f docker/docker-compose.yml ps redis
+
+# Test connection from inside the network
+docker-compose -f docker/docker-compose.yml exec api \
+  bun -e "const r = require('ioredis'); new r('redis://redis:6379').ping().then(console.log)"
+```
+
+### Build is slow
+
+Enable BuildKit and layer caching:
+
+```bash
+export DOCKER_BUILDKIT=1
+docker build \
+  --cache-from bunship-api:latest \
+  --build-arg BUILDKIT_INLINE_CACHE=1 \
+  -f docker/Dockerfile.api \
+  -t bunship-api:latest .
+```
+
+The Dockerfile copies `package.json` and `bun.lockb` before source code, so dependency installation is cached unless lockfile changes.

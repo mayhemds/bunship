@@ -1,0 +1,279 @@
+---
+title: "Webhooks"
+description: "Send real-time event notifications"
+---
+
+BunShip includes a complete outbound webhook system. Your users can register HTTPS endpoints and receive POST requests whenever events occur in their organization -- new members joining, billing changes, API key creation, and any custom events you define.
+
+## Creating Webhook Endpoints
+
+Each organization can register multiple webhook endpoints. When creating an endpoint, BunShip generates a unique signing secret:
+
+```typescript
+const [webhook] = await db
+  .insert(webhooks)
+  .values({
+    organizationId: orgId,
+    url: data.url,
+    description: data.description || null,
+    secret, // Auto-generated: whsec_<64 hex chars>
+    events: data.events || [], // Empty array = all events
+    isActive: true,
+  })
+  .returning();
+```
+
+**API call:**
+
+```bash
+curl -X POST https://api.example.com/api/v1/webhooks \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/webhooks/bunship",
+    "description": "Production webhook",
+    "events": ["member.added", "billing.updated"]
+  }'
+```
+
+The response includes the `secret` field. This is the only time the full secret is returned -- store it securely on your receiving server.
+
+<Warning>
+  If `events` is an empty array, the endpoint receives **all** event types. Specify events
+  explicitly to reduce noise.
+</Warning>
+
+## Event Types and Payloads
+
+BunShip dispatches events as JSON POST requests. Every payload follows this structure:
+
+```json
+{
+  "type": "member.added",
+  "timestamp": "2025-03-15T14:22:00.000Z",
+  "data": {
+    "memberId": "mem_abc123",
+    "organizationId": "org_xyz789",
+    "email": "newuser@example.com",
+    "role": "member"
+  }
+}
+```
+
+Common event types include:
+
+| Event              | Trigger                          |
+| ------------------ | -------------------------------- |
+| `member.added`     | New member joins organization    |
+| `member.removed`   | Member removed from organization |
+| `billing.updated`  | Subscription plan changes        |
+| `billing.canceled` | Subscription canceled            |
+| `api_key.created`  | New API key generated            |
+| `api_key.revoked`  | API key revoked                  |
+| `project.created`  | New project created              |
+| `test`             | Sent via the test endpoint       |
+
+You can add custom event types by dispatching them through the webhook service.
+
+## Signature Verification
+
+Every webhook delivery is signed with HMAC-SHA256. The signature is sent in the `X-Webhook-Signature` header using a timestamp-prefixed format that prevents replay attacks:
+
+```
+t=1710510120,v1=5d3e8a9b7c1f4e2d6a0b8c3e5f7a9d1b4c6e8f0a2d4b6c8e0f2a4d6b8c0e2f
+```
+
+### How signing works
+
+BunShip creates the signature by concatenating a Unix timestamp with the raw JSON payload, then computing an HMAC-SHA256 hash using the endpoint's secret:
+
+```typescript
+export async function signWebhookPayload(payload: string, secret: string): Promise<string> {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signedPayload = `${timestamp}.${payload}`;
+  const signature = await hmacSha256(secret, signedPayload);
+
+  return `t=${timestamp},v1=${signature}`;
+}
+```
+
+### Verifying on your server
+
+To verify a webhook on your receiving server:
+
+<Steps>
+  <Step title="Extract the timestamp and signature">
+    Parse the `X-Webhook-Signature` header to get the `t` (timestamp) and `v1` (signature) values.
+  </Step>
+  <Step title="Check the timestamp">
+    Reject requests where the timestamp is more than 5 minutes old to prevent replay attacks.
+    ```typescript
+    const currentTime = Math.floor(Date.now() / 1000);
+    if (currentTime - timestamp > 300) {
+      return res.status(400).send("Timestamp too old");
+    }
+    ```
+  </Step>
+  <Step title="Compute the expected signature">
+    Recreate the signed payload (`timestamp.body`) and compute HMAC-SHA256 with your webhook secret.
+  </Step>
+  <Step title="Compare signatures">
+    Use a constant-time comparison to prevent timing attacks:
+    ```typescript
+    const expected = await hmacSha256(secret, `${timestamp}.${body}`);
+    const isValid = crypto.subtle.timingSafeEqual(
+      new TextEncoder().encode(expected),
+      new TextEncoder().encode(receivedSignature)
+    );
+    ```
+  </Step>
+</Steps>
+
+### Verification example (Node.js / Bun)
+
+```typescript
+import { createHmac, timingSafeEqual } from "crypto";
+
+function verifyWebhook(body: string, signature: string, secret: string): boolean {
+  const elements = signature.split(",");
+  const timestamp = elements.find((e) => e.startsWith("t="))?.split("=")[1];
+  const sig = elements.find((e) => e.startsWith("v1="))?.split("=")[1];
+
+  if (!timestamp || !sig) return false;
+
+  // Reject old timestamps (5 minute tolerance)
+  if (Math.floor(Date.now() / 1000) - parseInt(timestamp) > 300) return false;
+
+  const expected = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
+}
+```
+
+## Retry Logic
+
+Failed deliveries are retried up to **3 attempts** with increasing delays:
+
+| Attempt   | Delay      |
+| --------- | ---------- |
+| 1st retry | 1 minute   |
+| 2nd retry | 5 minutes  |
+| 3rd retry | 15 minutes |
+
+A delivery is considered failed if the receiving server returns a non-2xx status code or the request times out (30 seconds). After all retries are exhausted, the delivery is marked as permanently failed.
+
+```typescript
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAYS = [60, 300, 900]; // seconds
+```
+
+The webhook worker uses BullMQ with exponential backoff for queue-based retries:
+
+```typescript
+export const webhookQueue = new Queue<WebhookJobData>("webhook", {
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: {
+      type: "exponential",
+      delay: 5000, // Start with 5 seconds
+    },
+  },
+});
+```
+
+## Delivery Tracking and Debugging
+
+Every dispatch creates a `webhookDeliveries` record that tracks:
+
+- **Event type** -- Which event triggered the delivery
+- **Payload** -- The full JSON body sent
+- **Status code** -- HTTP response code from the receiving server
+- **Response** -- First 500 characters of the response body
+- **Attempts** -- Number of delivery attempts made
+- **Delivered at** -- Timestamp of successful delivery (null if still pending)
+- **Next retry at** -- When the next retry is scheduled
+
+Retrieve delivery history for a specific endpoint:
+
+```bash
+curl https://api.example.com/api/v1/webhooks/<webhook_id>/deliveries \
+  -H "Authorization: Bearer <token>"
+```
+
+### Sending a test event
+
+Verify your endpoint is working by sending a test event:
+
+```bash
+curl -X POST https://api.example.com/api/v1/webhooks/<webhook_id>/test \
+  -H "Authorization: Bearer <token>"
+```
+
+This dispatches a `test` event with a sample payload:
+
+```json
+{
+  "type": "test",
+  "timestamp": "2025-03-15T14:22:00.000Z",
+  "data": {
+    "message": "This is a test webhook event",
+    "webhookId": "wh_abc123"
+  }
+}
+```
+
+## Delivery Headers
+
+Each webhook request includes these headers:
+
+| Header                  | Description                            |
+| ----------------------- | -------------------------------------- |
+| `Content-Type`          | `application/json`                     |
+| `X-Webhook-Signature`   | HMAC-SHA256 signature (`t=...,v1=...`) |
+| `X-Webhook-Event`       | Event type (e.g., `member.added`)      |
+| `X-Webhook-Delivery-ID` | Unique delivery ID for deduplication   |
+| `User-Agent`            | `BunShip-Webhooks/1.0`                 |
+
+## Secret Rotation
+
+Rotate a webhook's signing secret without deleting and recreating the endpoint:
+
+```bash
+curl -X POST https://api.example.com/api/v1/webhooks/<webhook_id>/rotate-secret \
+  -H "Authorization: Bearer <token>"
+```
+
+The new secret is returned in the response. Update your receiving server immediately -- deliveries signed with the old secret will fail verification.
+
+## SSRF Protection
+
+BunShip validates webhook URLs to prevent Server-Side Request Forgery (SSRF). The following are blocked:
+
+- **Private IP ranges** -- `127.x.x.x`, `10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`, `169.254.x.x`
+- **Localhost** -- `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`
+- **Internal hostnames** -- Hostnames without a dot (e.g., `redis`, `postgres`)
+- **Non-HTTP protocols** -- Only `http://` and `https://` are allowed
+
+```typescript
+const PRIVATE_IP_PATTERNS = [
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^0\./,
+];
+const BLOCKED_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]);
+```
+
+Validation runs on both endpoint creation and update. Attempts to register blocked URLs return a `400 Validation Error`.
+
+## Plan Limits
+
+Webhook endpoint counts are enforced per plan:
+
+| Plan       | Max endpoints |
+| ---------- | ------------- |
+| Free       | 1             |
+| Pro        | 10            |
+| Enterprise | Unlimited     |

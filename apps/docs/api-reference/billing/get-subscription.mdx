@@ -1,0 +1,69 @@
+---
+title: "Get Subscription"
+api: "GET /api/v1/organizations/{orgId}/billing"
+description: "Get the current subscription status and plan details"
+---
+
+Returns the organization's current subscription status, active plan, and Stripe subscription details.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Always `true` on success.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  <Expandable title="data properties">
+    <ResponseField name="plan" type="object">
+      Current plan details (name, limits, features).
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Subscription status: `"active"`, `"trialing"`, `"past_due"`, `"canceled"`, `"unpaid"`, or
+      `"free"`.
+    </ResponseField>
+    <ResponseField name="subscription" type="object">
+      Stripe subscription details including `id`, `currentPeriodEnd`, and `cancelAtPeriodEnd`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": {
+    "plan": {
+      "name": "Pro",
+      "limits": {
+        "members": 25,
+        "apiRequests": 100000,
+        "storage": 10737418240
+      }
+    },
+    "status": "active",
+    "subscription": {
+      "id": "sub_1abc123",
+      "currentPeriodEnd": "2024-02-15T10:00:00Z",
+      "cancelAtPeriodEnd": false
+    }
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/billing \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

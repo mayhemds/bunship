@@ -1,0 +1,482 @@
+---
+title: AWS
+description: "Deploy to AWS with ECS or EC2"
+---
+
+AWS gives you full control over infrastructure, scaling, and networking. This guide covers deploying BunShip with ECS Fargate (the recommended approach), with notes on EC2 and Lambda alternatives.
+
+## Architecture Options
+
+| Option           | Best For                                                        | Operational Overhead |
+| ---------------- | --------------------------------------------------------------- | -------------------- |
+| **ECS Fargate**  | Most teams. Serverless containers, no servers to manage.        | Low                  |
+| **ECS on EC2**   | Cost optimization at scale. You manage the EC2 instances.       | Medium               |
+| **EC2 directly** | Full control. Run Docker or PM2 on bare instances.              | High                 |
+| **Lambda**       | Event-driven workloads. Not ideal for BunShip's persistent API. | Low (but limited)    |
+
+<Note>
+  This guide focuses on ECS Fargate. It provides the best balance of simplicity and production
+  readiness for BunShip deployments.
+</Note>
+
+## Prerequisites
+
+- An [AWS account](https://aws.amazon.com)
+- The [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) installed and configured
+- A [Turso](https://turso.tech) account for the database
+- Docker installed locally (for building images)
+
+```bash
+# Verify AWS CLI
+aws --version
+aws sts get-caller-identity
+```
+
+## ECS Fargate Deployment
+
+<Steps>
+  <Step title="Create an ECR repository">
+    Amazon Elastic Container Registry stores your Docker images.
+
+    ```bash
+    aws ecr create-repository \
+      --repository-name bunship-api \
+      --region us-east-1
+
+    # Save the repository URI
+    # Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/bunship-api
+    ```
+
+  </Step>
+  <Step title="Build and push the image">
+    ```bash
+    # Authenticate Docker with ECR
+    aws ecr get-login-password --region us-east-1 | \
+      docker login --username AWS --password-stdin \
+      123456789012.dkr.ecr.us-east-1.amazonaws.com
+
+    # Build the image
+    docker build -f docker/Dockerfile.api -t bunship-api:latest .
+
+    # Tag for ECR
+    docker tag bunship-api:latest \
+      123456789012.dkr.ecr.us-east-1.amazonaws.com/bunship-api:latest
+
+    # Push
+    docker push \
+      123456789012.dkr.ecr.us-east-1.amazonaws.com/bunship-api:latest
+    ```
+
+  </Step>
+  <Step title="Create an ECS cluster">
+    ```bash
+    aws ecs create-cluster \
+      --cluster-name bunship-cluster \
+      --capacity-providers FARGATE \
+      --default-capacity-provider-strategy capacityProvider=FARGATE,weight=1
+    ```
+  </Step>
+  <Step title="Store secrets in AWS Secrets Manager">
+    Store sensitive values separately from your task definition.
+
+    ```bash
+    aws secretsmanager create-secret \
+      --name bunship/production \
+      --secret-string '{
+        "JWT_SECRET": "your-jwt-secret",
+        "JWT_REFRESH_SECRET": "your-refresh-secret",
+        "DATABASE_AUTH_TOKEN": "your-turso-token",
+        "STRIPE_SECRET_KEY": "sk_live_xxx",
+        "STRIPE_WEBHOOK_SECRET": "whsec_xxx",
+        "RESEND_API_KEY": "re_xxx",
+        "REDIS_URL": "rediss://default:xxx@your-redis:6379"
+      }'
+    ```
+
+  </Step>
+  <Step title="Create a task definition">
+    Save this as `ecs-task-definition.json`:
+
+    ```json
+    {
+      "family": "bunship-api",
+      "networkMode": "awsvpc",
+      "requiresCompatibilities": ["FARGATE"],
+      "cpu": "512",
+      "memory": "1024",
+      "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+      "taskRoleArn": "arn:aws:iam::123456789012:role/bunshipTaskRole",
+      "containerDefinitions": [
+        {
+          "name": "api",
+          "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/bunship-api:latest",
+          "essential": true,
+          "portMappings": [
+            {
+              "containerPort": 3000,
+              "protocol": "tcp"
+            }
+          ],
+          "environment": [
+            { "name": "NODE_ENV", "value": "production" },
+            { "name": "PORT", "value": "3000" },
+            { "name": "API_URL", "value": "https://api.yourdomain.com" },
+            { "name": "FRONTEND_URL", "value": "https://yourdomain.com" },
+            { "name": "DATABASE_URL", "value": "libsql://your-db.turso.io" }
+          ],
+          "secrets": [
+            {
+              "name": "JWT_SECRET",
+              "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:bunship/production:JWT_SECRET::"
+            },
+            {
+              "name": "JWT_REFRESH_SECRET",
+              "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:bunship/production:JWT_REFRESH_SECRET::"
+            },
+            {
+              "name": "DATABASE_AUTH_TOKEN",
+              "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:bunship/production:DATABASE_AUTH_TOKEN::"
+            },
+            {
+              "name": "STRIPE_SECRET_KEY",
+              "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:bunship/production:STRIPE_SECRET_KEY::"
+            },
+            {
+              "name": "REDIS_URL",
+              "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:bunship/production:REDIS_URL::"
+            },
+            {
+              "name": "RESEND_API_KEY",
+              "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:bunship/production:RESEND_API_KEY::"
+            }
+          ],
+          "healthCheck": {
+            "command": ["CMD-SHELL", "bun fetch http://localhost:3000/health || exit 1"],
+            "interval": 30,
+            "timeout": 5,
+            "retries": 3,
+            "startPeriod": 10
+          },
+          "logConfiguration": {
+            "logDriver": "awslogs",
+            "options": {
+              "awslogs-group": "/ecs/bunship-api",
+              "awslogs-region": "us-east-1",
+              "awslogs-stream-prefix": "api"
+            }
+          }
+        }
+      ]
+    }
+    ```
+
+    Register the task definition:
+
+    ```bash
+    aws ecs register-task-definition \
+      --cli-input-json file://ecs-task-definition.json
+    ```
+
+  </Step>
+  <Step title="Create an Application Load Balancer">
+    The ALB distributes traffic across your ECS tasks and terminates TLS.
+
+    ```bash
+    # Create a target group
+    aws elbv2 create-target-group \
+      --name bunship-api-tg \
+      --protocol HTTP \
+      --port 3000 \
+      --vpc-id vpc-xxx \
+      --target-type ip \
+      --health-check-path /health \
+      --health-check-interval-seconds 30
+
+    # Create the ALB
+    aws elbv2 create-load-balancer \
+      --name bunship-alb \
+      --subnets subnet-xxx subnet-yyy \
+      --security-groups sg-xxx
+
+    # Create an HTTPS listener
+    aws elbv2 create-listener \
+      --load-balancer-arn arn:aws:elasticloadbalancing:... \
+      --protocol HTTPS \
+      --port 443 \
+      --certificates CertificateArn=arn:aws:acm:us-east-1:123456789012:certificate/xxx \
+      --default-actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:...
+
+    # Redirect HTTP to HTTPS
+    aws elbv2 create-listener \
+      --load-balancer-arn arn:aws:elasticloadbalancing:... \
+      --protocol HTTP \
+      --port 80 \
+      --default-actions Type=redirect,RedirectConfig='{Protocol=HTTPS,Port=443,StatusCode=HTTP_301}'
+    ```
+
+  </Step>
+  <Step title="Create the ECS service">
+    ```bash
+    aws ecs create-service \
+      --cluster bunship-cluster \
+      --service-name bunship-api \
+      --task-definition bunship-api:1 \
+      --desired-count 2 \
+      --launch-type FARGATE \
+      --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx,subnet-yyy],securityGroups=[sg-xxx],assignPublicIp=ENABLED}" \
+      --load-balancers "targetGroupArn=arn:aws:elasticloadbalancing:...,containerName=api,containerPort=3000" \
+      --deployment-configuration "minimumHealthyPercent=100,maximumPercent=200" \
+      --health-check-grace-period-seconds 60
+    ```
+
+    The deployment configuration ensures zero downtime: ECS starts new tasks before draining old ones.
+
+  </Step>
+  <Step title="Deploy the worker">
+    Create a second task definition for the worker with a different command. The worker does not need a load balancer or port mappings.
+
+    ```bash
+    # Use the same image, different command
+    # In the container definition:
+    # "command": ["bun", "run", "apps/api/src/worker.ts"]
+    # Remove portMappings and healthCheck
+
+    aws ecs create-service \
+      --cluster bunship-cluster \
+      --service-name bunship-worker \
+      --task-definition bunship-worker:1 \
+      --desired-count 1 \
+      --launch-type FARGATE \
+      --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx],securityGroups=[sg-xxx],assignPublicIp=ENABLED}"
+    ```
+
+  </Step>
+</Steps>
+
+## ElastiCache for Redis
+
+If you prefer AWS-managed Redis over Upstash or other providers:
+
+```bash
+# Create a Redis cluster
+aws elasticache create-replication-group \
+  --replication-group-id bunship-redis \
+  --replication-group-description "BunShip Redis" \
+  --engine redis \
+  --engine-version 7.0 \
+  --cache-node-type cache.t4g.micro \
+  --num-cache-clusters 1 \
+  --automatic-failover-enabled \
+  --at-rest-encryption-enabled \
+  --transit-encryption-enabled \
+  --cache-subnet-group-name your-subnet-group \
+  --security-group-ids sg-xxx
+```
+
+Update your `REDIS_URL` secret to point to the ElastiCache endpoint:
+
+```
+rediss://your-cluster.xxx.cache.amazonaws.com:6379
+```
+
+<Warning>
+  ElastiCache is VPC-only. Your ECS tasks must run in the same VPC and security group must allow
+  port 6379 between the ECS tasks and the ElastiCache cluster.
+</Warning>
+
+## S3 Bucket Configuration
+
+Create a bucket for file uploads:
+
+```bash
+# Create the bucket
+aws s3api create-bucket \
+  --bucket bunship-uploads \
+  --region us-east-1
+
+# Block public access (serve files through signed URLs or CloudFront)
+aws s3api put-public-access-block \
+  --bucket bunship-uploads \
+  --public-access-block-configuration \
+    BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+# Set CORS for direct uploads
+aws s3api put-bucket-cors \
+  --bucket bunship-uploads \
+  --cors-configuration '{
+    "CORSRules": [
+      {
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["GET", "PUT", "POST"],
+        "AllowedOrigins": ["https://yourdomain.com"],
+        "MaxAgeSeconds": 3600
+      }
+    ]
+  }'
+```
+
+Set the environment variables:
+
+```bash
+S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
+S3_BUCKET=bunship-uploads
+S3_ACCESS_KEY_ID=AKIA...
+S3_SECRET_ACCESS_KEY=xxx
+S3_REGION=us-east-1
+```
+
+<Note>
+  For ECS tasks, use an IAM task role with S3 permissions instead of access keys. This avoids
+  storing long-lived credentials.
+</Note>
+
+## CloudFront CDN
+
+Place CloudFront in front of your ALB for edge caching and DDoS protection:
+
+```bash
+aws cloudfront create-distribution \
+  --origin-domain-name bunship-alb-xxx.us-east-1.elb.amazonaws.com \
+  --default-root-object "" \
+  --query 'Distribution.DomainName'
+```
+
+Key CloudFront settings for an API:
+
+| Setting                | Value                                          | Reason                                      |
+| ---------------------- | ---------------------------------------------- | ------------------------------------------- |
+| Cache Policy           | `CachingDisabled`                              | API responses are dynamic                   |
+| Origin Request Policy  | `AllViewer`                                    | Forward all headers, cookies, query strings |
+| Viewer Protocol Policy | `redirect-to-https`                            | Enforce HTTPS                               |
+| Allowed HTTP Methods   | `GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE` | Full API support                            |
+
+For static assets served from S3, create a separate CloudFront behavior with caching enabled.
+
+## ALB Health Checks
+
+The ALB health check confirms each ECS task is ready to serve traffic:
+
+| Setting             | Value                   |
+| ------------------- | ----------------------- |
+| Path                | `/health`               |
+| Protocol            | HTTP                    |
+| Port                | 3000                    |
+| Healthy threshold   | 2 consecutive successes |
+| Unhealthy threshold | 3 consecutive failures  |
+| Interval            | 30 seconds              |
+| Timeout             | 5 seconds               |
+
+ECS also runs the container-level health check defined in the task definition. A task that fails either check is replaced automatically.
+
+## CI/CD with GitHub Actions
+
+BunShip includes a release workflow (`.github/workflows/release.yml`) that builds and pushes Docker images when you create a version tag. Extend it with an ECS deployment step:
+
+```yaml
+# Add to .github/workflows/release.yml after the build-and-push job:
+
+deploy:
+  name: Deploy to ECS
+  runs-on: ubuntu-latest
+  needs: build-and-push
+  if: startsWith(github.ref, 'refs/tags/v')
+
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Download task definition
+      run: |
+        aws ecs describe-task-definition \
+          --task-definition bunship-api \
+          --query taskDefinition > task-definition.json
+
+    - name: Update image in task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: task-definition.json
+        container-name: api
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.version }}
+
+    - name: Deploy to ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: bunship-api
+        cluster: bunship-cluster
+        wait-for-service-stability: true
+
+    - name: Deploy worker
+      run: |
+        aws ecs update-service \
+          --cluster bunship-cluster \
+          --service bunship-worker \
+          --force-new-deployment
+```
+
+Add these secrets to your GitHub repository:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+
+<Note>
+  For better security, use [GitHub OIDC with
+  AWS](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services)
+  instead of long-lived access keys.
+</Note>
+
+## Scaling
+
+### ECS Auto Scaling
+
+Configure target tracking to scale based on CPU utilization:
+
+```bash
+# Register a scalable target
+aws application-autoscaling register-scalable-target \
+  --service-namespace ecs \
+  --resource-id service/bunship-cluster/bunship-api \
+  --scalable-dimension ecs:service:DesiredCount \
+  --min-capacity 2 \
+  --max-capacity 10
+
+# Create a scaling policy
+aws application-autoscaling put-scaling-policy \
+  --service-namespace ecs \
+  --resource-id service/bunship-cluster/bunship-api \
+  --scalable-dimension ecs:service:DesiredCount \
+  --policy-name cpu-tracking \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-scaling-policy-configuration '{
+    "TargetValue": 70.0,
+    "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+    },
+    "ScaleInCooldown": 300,
+    "ScaleOutCooldown": 60
+  }'
+```
+
+This maintains average CPU at 70%, scaling between 2 and 10 tasks.
+
+### Cost Estimates
+
+Approximate monthly costs for a small production deployment in us-east-1:
+
+| Resource                     | Configuration       | Estimated Cost |
+| ---------------------------- | ------------------- | -------------- |
+| ECS Fargate (API, 2 tasks)   | 0.5 vCPU, 1 GB each | ~$30           |
+| ECS Fargate (Worker, 1 task) | 0.5 vCPU, 1 GB      | ~$15           |
+| ALB                          | Standard            | ~$18           |
+| ElastiCache (Redis)          | cache.t4g.micro     | ~$12           |
+| CloudFront                   | 10 GB transfer      | ~$1            |
+| S3                           | 5 GB storage        | ~$0.12         |
+| Secrets Manager              | 7 secrets           | ~$3            |
+| **Total**                    |                     | **~$79**       |
+
+Costs scale with traffic. Fargate Spot can reduce compute costs by up to 70% for fault-tolerant workloads like the worker.

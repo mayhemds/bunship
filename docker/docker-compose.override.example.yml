@@ -1,0 +1,111 @@
+version: "3.9"
+
+# ============================================
+# Docker Compose Override Example
+# Copy to docker-compose.override.yml for local customizations
+# This file is automatically loaded by docker-compose
+# ============================================
+
+services:
+  # ============================================
+  # API - Development Overrides
+  # ============================================
+  api:
+    # Custom environment variables for your local setup
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=debug
+      - ENABLE_SWAGGER=true
+
+    # Additional volume mounts
+    volumes:
+      - ../uploads:/app/uploads
+
+    # Custom command for debugging
+    # command: ["bun", "run", "--inspect", "src/index.ts"]
+
+    # Additional ports for debugging
+    # ports:
+    #   - "9229:9229"  # Node inspector
+
+  # ============================================
+  # Redis Commander - GUI for Redis
+  # ============================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: bunship-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - bunship-network
+
+  # ============================================
+  # MinIO - Local S3 Compatible Storage
+  # ============================================
+  minio:
+    image: minio/minio:latest
+    container_name: bunship-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - bunship-network
+
+  # ============================================
+  # Mailhog - Email Testing
+  # ============================================
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: bunship-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI
+    networks:
+      - bunship-network
+
+  # ============================================
+  # Postgres (Alternative to Turso for local dev)
+  # ============================================
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: bunship-postgres
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     - POSTGRES_USER=bunship
+  #     - POSTGRES_PASSWORD=bunship
+  #     - POSTGRES_DB=bunship
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U bunship"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - bunship-network
+
+volumes:
+  minio-data:
+    driver: local
+  # postgres-data:
+  #   driver: local

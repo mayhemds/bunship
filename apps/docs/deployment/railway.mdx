@@ -1,0 +1,199 @@
+---
+title: Railway
+description: "One-click deploy to Railway"
+---
+
+[Railway](https://railway.app) is the fastest way to get BunShip running in production. It handles builds, deployments, networking, and TLS certificates automatically.
+
+## Prerequisites
+
+- A [Railway account](https://railway.app)
+- A [Turso](https://turso.tech) account for the database
+- A [Stripe](https://stripe.com) account with live API keys
+- A [Resend](https://resend.com) account for transactional email
+
+## Deploy to Railway
+
+<Steps>
+  <Step title="Create a new project">
+    Log in to [Railway](https://railway.app) and click **New Project**. Choose **Deploy from GitHub repo** and select your BunShip repository.
+
+    Railway detects the Dockerfile automatically. Point it to `docker/Dockerfile.api` if it does not detect it on its own:
+
+    1. Go to your service **Settings**
+    2. Under **Build**, set the Dockerfile path to `docker/Dockerfile.api`
+    3. Set the build context to `/` (repository root)
+
+  </Step>
+  <Step title="Add a Redis service">
+    In your Railway project, click **New** and select **Database > Redis**.
+
+    Railway provisions a managed Redis instance and exposes a `REDIS_URL` variable. Link it to your API service:
+
+    1. Click the API service
+    2. Go to **Variables**
+    3. Add a reference variable: `REDIS_URL` = `${{Redis.REDIS_URL}}`
+    4. Add `REDIS_HOST` = `${{Redis.REDISHOST}}`
+    5. Add `REDIS_PORT` = `${{Redis.REDISPORT}}`
+
+  </Step>
+  <Step title="Set up Turso database">
+    BunShip uses Turso for its database. Create a production database:
+
+    ```bash
+    turso db create bunship-prod
+    turso db show bunship-prod --url       # Copy the URL
+    turso db tokens create bunship-prod    # Copy the token
+    ```
+
+    Add these as Railway variables:
+
+    - `DATABASE_URL` = `libsql://your-db-name.turso.io`
+    - `DATABASE_AUTH_TOKEN` = your token
+
+  </Step>
+  <Step title="Configure environment variables">
+    Add all remaining variables in the Railway service settings. See the full list in the [Deployment Overview](/deployment/overview#environment-configuration).
+
+    The minimum set:
+
+    ```
+    NODE_ENV=production
+    API_URL=https://your-service.up.railway.app
+    FRONTEND_URL=https://yourdomain.com
+    JWT_SECRET=<generated-secret>
+    JWT_REFRESH_SECRET=<generated-secret>
+    STRIPE_SECRET_KEY=sk_live_xxx
+    STRIPE_WEBHOOK_SECRET=whsec_xxx
+    RESEND_API_KEY=re_xxx
+    EMAIL_FROM=YourApp <noreply@yourdomain.com>
+    ```
+
+    <Note>
+      Generate JWT secrets with `openssl rand -base64 32`. Use different values for `JWT_SECRET` and `JWT_REFRESH_SECRET`.
+    </Note>
+
+  </Step>
+  <Step title="Add a worker service">
+    BunShip needs a separate worker process for background jobs. In your Railway project:
+
+    1. Click **New > GitHub Repo** and select the same repository
+    2. Name the service `worker`
+    3. Set the Dockerfile path to `docker/Dockerfile.api`
+    4. Override the start command: `bun run apps/api/src/worker.ts`
+    5. Copy all environment variables from the API service
+    6. Link the same Redis instance
+
+    The worker does not need a public domain or port.
+
+  </Step>
+  <Step title="Run database migrations">
+    Open the API service's **Shell** tab in Railway and run:
+
+    ```bash
+    bun run db:migrate
+    ```
+
+    Alternatively, run migrations locally against the production Turso database:
+
+    ```bash
+    TURSO_DATABASE_URL=libsql://your-db.turso.io \
+    TURSO_AUTH_TOKEN=your-token \
+    bun run db:migrate
+    ```
+
+  </Step>
+  <Step title="Deploy">
+    Push to your main branch. Railway builds and deploys automatically.
+
+    ```bash
+    git push origin main
+    ```
+
+    Watch the build logs in the Railway dashboard. Once the deployment succeeds, Railway assigns a public URL like `https://your-service.up.railway.app`.
+
+  </Step>
+</Steps>
+
+## Custom Domains
+
+<Steps>
+  <Step title="Add a domain in Railway">
+    Go to your API service **Settings > Networking > Public Networking** and click **Generate Domain** or **Custom Domain**.
+
+    Enter your domain, for example `api.yourdomain.com`.
+
+  </Step>
+  <Step title="Update DNS">
+    Add a CNAME record pointing to your Railway domain:
+
+    ```
+    Type:  CNAME
+    Name:  api
+    Value: your-service.up.railway.app
+    ```
+
+  </Step>
+  <Step title="Update environment variables">
+    Change `API_URL` to match your custom domain:
+
+    ```
+    API_URL=https://api.yourdomain.com
+    ```
+
+    Update the Stripe webhook endpoint URL as well.
+
+  </Step>
+</Steps>
+
+Railway provisions TLS certificates automatically. No additional configuration is needed for HTTPS.
+
+## Monitoring
+
+### Build and Deploy Logs
+
+Railway shows real-time build output and deploy logs in the dashboard. Click a service, then switch to the **Deployments** tab to see previous deployments and their logs.
+
+### Health Checks
+
+Railway monitors your service automatically. To add an explicit health check:
+
+1. Go to service **Settings > Deploy**
+2. Set the health check path to `/health`
+3. Set the health check timeout to `30` seconds
+
+Railway will wait for a 200 response before routing traffic to a new deployment.
+
+### Metrics
+
+The Railway dashboard shows CPU, memory, and network usage per service. For deeper observability, add Sentry error tracking:
+
+```
+SENTRY_DSN=https://xxx@xxx.ingest.sentry.io/xxx
+```
+
+### Alerts
+
+Railway sends notifications for failed deployments. Configure Slack or Discord webhooks under **Project Settings > Integrations** for team-wide alerts.
+
+## Costs and Scaling
+
+Railway bills per resource-second. Typical BunShip costs for a small SaaS:
+
+| Service                     | Estimated Monthly Cost |
+| --------------------------- | ---------------------- |
+| API (512 MB, shared CPU)    | ~$5-10                 |
+| Worker (512 MB, shared CPU) | ~$5-10                 |
+| Redis (25 MB)               | ~$3-5                  |
+| **Total**                   | **~$13-25**            |
+
+To handle more traffic, increase the API service's memory and CPU in **Settings > Resources**, or deploy multiple instances by increasing the replica count.
+
+## Redeployments
+
+Railway redeploys automatically on every push to your connected branch. To trigger a manual redeploy:
+
+1. Go to the service **Deployments** tab
+2. Click **Redeploy** on the latest deployment
+
+To roll back, click a previous successful deployment and select **Rollback**.

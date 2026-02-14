@@ -1,0 +1,24 @@
+name: Sync Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/docs/**"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Push docs to bunship-docs repo
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.DOCS_DEPLOY_KEY }}
+        with:
+          source-directory: "apps/docs"
+          destination-github-username: "mayhemds"
+          destination-repository-name: "bunship-docs"
+          target-branch: "main"
+          commit-message: "sync: update docs from bunship"

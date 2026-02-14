@@ -1,0 +1,572 @@
+---
+title: Installation
+description: "Detailed installation and configuration guide"
+---
+
+## System Requirements
+
+| Software                                              | Version | Required | Purpose                                     |
+| ----------------------------------------------------- | ------- | -------- | ------------------------------------------- |
+| [Bun](https://bun.sh)                                 | 1.1.0+  | Yes      | JavaScript runtime and package manager      |
+| [Redis](https://redis.io)                             | 7.0+    | Yes      | Background job queues (BullMQ) and caching  |
+| [Turso CLI](https://docs.turso.tech/cli/installation) | Latest  | No       | Cloud SQLite database management            |
+| [Stripe CLI](https://stripe.com/docs/stripe-cli)      | Latest  | No       | Local webhook forwarding during development |
+
+## Install Dependencies
+
+<Steps>
+  <Step title="Install Bun">
+    ```bash
+    curl -fsSL https://bun.sh/install | bash
+    ```
+
+    Verify the installation:
+
+    ```bash
+    bun --version
+    # Should print 1.1.0 or later
+    ```
+
+  </Step>
+
+  <Step title="Install Redis">
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install redis
+        brew services start redis
+        ```
+      </Tab>
+      <Tab title="Ubuntu / Debian">
+        ```bash
+        sudo apt update
+        sudo apt install redis-server
+        sudo systemctl start redis-server
+        sudo systemctl enable redis-server
+        ```
+      </Tab>
+      <Tab title="Docker">
+        ```bash
+        docker run -d --name redis -p 6379:6379 redis:7-alpine
+        ```
+      </Tab>
+    </Tabs>
+
+    Verify Redis is running:
+
+    ```bash
+    redis-cli ping
+    # Should return: PONG
+    ```
+
+  </Step>
+
+  <Step title="Clone and install">
+    ```bash
+    git clone https://github.com/bunship/bunship.git my-saas
+    cd my-saas
+    bun install
+    ```
+
+    This installs all workspace packages:
+
+    | Package | Path | Description |
+    |---------|------|-------------|
+    | `@bunship/api` | `apps/api` | Main Elysia API application |
+    | `@bunship/database` | `packages/database` | Drizzle ORM schema and migrations |
+    | `@bunship/config` | `packages/config` | Shared configuration |
+    | `@bunship/emails` | `packages/emails` | React Email templates |
+    | `@bunship/eden` | `packages/eden` | Type-safe API client |
+    | `@bunship/utils` | `packages/utils` | Shared utilities |
+
+  </Step>
+
+  <Step title="Create your environment file">
+    ```bash
+    cp .env.example .env
+    ```
+
+    The sections below walk through every variable in this file.
+
+  </Step>
+</Steps>
+
+## Environment Configuration
+
+### Application Settings
+
+These control the runtime mode and URL references used in CORS headers, email links, and
+OAuth redirects.
+
+```bash
+NODE_ENV=development
+API_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:5173
+```
+
+| Variable       | Description                                                     | Default                 |
+| -------------- | --------------------------------------------------------------- | ----------------------- |
+| `NODE_ENV`     | `development`, `production`, or `test`                          | `development`           |
+| `API_URL`      | Public URL of the API (used in email links and OAuth callbacks) | `http://localhost:3000` |
+| `FRONTEND_URL` | Public URL of your frontend (used for CORS and redirect URLs)   | `http://localhost:5173` |
+
+### JWT Authentication
+
+BunShip uses a dual-token JWT strategy: short-lived access tokens and long-lived refresh
+tokens. Each needs its own signing secret.
+
+```bash
+JWT_SECRET=<access-token-secret>
+JWT_REFRESH_SECRET=<refresh-token-secret>
+```
+
+Generate secure random values:
+
+```bash
+bun -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+<Warning>
+  Use different values for `JWT_SECRET` and `JWT_REFRESH_SECRET`. Both must be at least 32
+  characters. Never commit these to version control.
+</Warning>
+
+## Database Setup
+
+BunShip uses [Drizzle ORM](https://orm.drizzle.team) with [Turso](https://turso.tech)
+(libSQL/SQLite). For local development you can use a file-based SQLite database with zero
+external dependencies.
+
+### Local Development (File-Based)
+
+The default `.env.example` is already configured for local file storage:
+
+```bash
+TURSO_DATABASE_URL=file:../../local.db
+```
+
+No additional setup is needed. The database file is created automatically when you run
+migrations.
+
+### Turso Cloud
+
+For staging or production, connect to a Turso cloud database:
+
+<Steps>
+  <Step title="Install the Turso CLI">
+    ```bash
+    curl -sSfL https://get.tur.so/install.sh | bash
+    ```
+  </Step>
+
+<Step title="Authenticate">```bash turso auth login ```</Step>
+
+<Step title="Create a database">```bash turso db create bunship ```</Step>
+
+  <Step title="Get connection credentials">
+    ```bash
+    # Database URL
+    turso db show bunship --url
+
+    # Auth token
+    turso db tokens create bunship
+    ```
+
+  </Step>
+
+  <Step title="Update your .env">
+    ```bash
+    TURSO_DATABASE_URL=libsql://your-database-name.turso.io
+    TURSO_AUTH_TOKEN=your-turso-auth-token
+    ```
+  </Step>
+</Steps>
+
+### Run Migrations and Seed
+
+```bash
+# Apply the schema
+bun run db:migrate
+
+# Optional: populate demo data
+bun run db:seed
+```
+
+The seed creates:
+
+- **Demo user** -- `demo@bunship.com` / `demo123456`
+- **Demo organization** with a Pro plan on trial
+- **Sample projects** attached to the organization
+
+<Accordion title="Other database commands">
+  | Command | Description | |---------|-------------| | `bun run db:generate` | Generate a new
+  migration after editing the Drizzle schema | | `bun run db:push` | Push schema directly to the
+  database (development only) | | `bun run db:studio` | Open Drizzle Studio, a visual database
+  browser | | `bun run db:reset` | Drop all tables and re-run migrations (destroys all data) |
+</Accordion>
+
+## Stripe Setup
+
+BunShip includes subscription management with free, Pro, and Enterprise tiers. All Stripe
+integration works in test mode without processing real payments.
+
+<Steps>
+  <Step title="Create a Stripe account">
+    Sign up at [stripe.com](https://stripe.com). The dashboard starts in test mode by default.
+  </Step>
+
+  <Step title="Get your API keys">
+    Navigate to **Developers > API keys** in the Stripe Dashboard and copy your **Secret key**
+    (starts with `sk_test_`).
+
+    ```bash
+    STRIPE_SECRET_KEY=sk_test_xxx
+    ```
+
+  </Step>
+
+  <Step title="Create products and prices">
+    Go to **Products** in the Stripe Dashboard and create your pricing tiers. You need price
+    IDs for each plan and billing interval:
+
+    ```bash
+    STRIPE_PRO_MONTHLY_PRICE_ID=price_xxx
+    STRIPE_PRO_YEARLY_PRICE_ID=price_xxx
+    STRIPE_ENTERPRISE_MONTHLY_PRICE_ID=price_xxx
+    STRIPE_ENTERPRISE_YEARLY_PRICE_ID=price_xxx
+    ```
+
+  </Step>
+
+  <Step title="Set up webhooks">
+    Stripe sends events (subscription created, payment failed, etc.) to your API via webhooks.
+
+    **For local development**, use the Stripe CLI:
+
+    ```bash
+    # Install: https://stripe.com/docs/stripe-cli
+    stripe login
+    stripe listen --forward-to localhost:3000/webhooks/stripe
+    ```
+
+    The CLI prints a webhook signing secret (`whsec_...`). Add it to your `.env`:
+
+    ```bash
+    STRIPE_WEBHOOK_SECRET=whsec_xxx
+    ```
+
+    **For production**, add a webhook endpoint in the Stripe Dashboard
+    (**Developers > Webhooks**) pointing to `https://your-domain.com/webhooks/stripe` and
+    subscribe to these events:
+
+    - `checkout.session.completed`
+    - `customer.subscription.created`
+    - `customer.subscription.updated`
+    - `customer.subscription.deleted`
+    - `invoice.paid`
+    - `invoice.payment_failed`
+
+  </Step>
+</Steps>
+
+<Note>
+  Stripe billing is optional for initial development. If `STRIPE_SECRET_KEY` is not set, billing
+  endpoints return a configuration error but the rest of the API works normally.
+</Note>
+
+## S3 / R2 Storage Setup
+
+File uploads use any S3-compatible object storage. Choose the tab matching your provider.
+
+<Tabs>
+  <Tab title="AWS S3">
+    ```bash
+    S3_ENDPOINT=https://s3.amazonaws.com
+    S3_BUCKET=your-bucket
+    S3_ACCESS_KEY_ID=AKIAxxxx
+    S3_SECRET_ACCESS_KEY=xxxx
+    S3_REGION=us-east-1
+    ```
+
+    Create an S3 bucket in the AWS Console and an IAM user with `s3:PutObject`,
+    `s3:GetObject`, and `s3:DeleteObject` permissions scoped to that bucket.
+
+  </Tab>
+
+  <Tab title="Cloudflare R2">
+    ```bash
+    S3_ENDPOINT=https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com
+    S3_BUCKET=your-bucket
+    S3_ACCESS_KEY_ID=xxxx
+    S3_SECRET_ACCESS_KEY=xxxx
+    S3_REGION=auto
+    ```
+
+    Create an R2 bucket in the Cloudflare dashboard and generate an API token with
+    **Object Read & Write** permissions.
+
+  </Tab>
+
+  <Tab title="MinIO (local)">
+    Run MinIO locally for development:
+
+    ```bash
+    docker run -d --name minio \
+      -p 9000:9000 -p 9001:9001 \
+      -e MINIO_ROOT_USER=minioadmin \
+      -e MINIO_ROOT_PASSWORD=minioadmin \
+      minio/minio server /data --console-address ":9001"
+    ```
+
+    ```bash
+    S3_ENDPOINT=http://localhost:9000
+    S3_BUCKET=bunship
+    S3_ACCESS_KEY_ID=minioadmin
+    S3_SECRET_ACCESS_KEY=minioadmin
+    S3_REGION=us-east-1
+    ```
+
+    Create the bucket at [http://localhost:9001](http://localhost:9001).
+
+  </Tab>
+</Tabs>
+
+<Note>
+  File storage is optional. If the S3 variables are not set, file upload endpoints return a
+  configuration error but the rest of the API works normally.
+</Note>
+
+## Redis Setup
+
+Redis powers two subsystems: **BullMQ** background job queues and a general-purpose
+**caching layer**.
+
+```bash
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_URL=redis://localhost:6379
+```
+
+For environments that require authentication:
+
+```bash
+REDIS_URL=redis://:your-password@your-host:6379
+```
+
+<Warning>
+  Redis is required. BunShip will fail to start if it cannot connect to Redis because the BullMQ
+  worker initialization runs at boot.
+</Warning>
+
+## Email Setup (Optional)
+
+BunShip sends transactional emails (verification, password reset, team invitations) through
+[Resend](https://resend.com).
+
+```bash
+RESEND_API_KEY=re_xxx
+EMAIL_FROM="BunShip <hello@yourdomain.com>"
+```
+
+<Steps>
+  <Step title="Create a Resend account">
+    Sign up at [resend.com](https://resend.com) and copy your API key.
+  </Step>
+
+<Step title="Verify your sending domain">
+  In the Resend dashboard, go to **Domains**, add your domain, and configure the DNS records Resend
+  provides (SPF, DKIM, DMARC).
+</Step>
+
+  <Step title="Update .env">
+    Set `RESEND_API_KEY` and change `EMAIL_FROM` to use your verified domain.
+  </Step>
+</Steps>
+
+<Note>
+  During development, Resend's test mode sends to any email address without a verified domain. If
+  `RESEND_API_KEY` is not set, emails are logged to the console instead of being sent.
+</Note>
+
+## OAuth Providers (Optional)
+
+### Google OAuth
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com).
+2. Create a project (or select an existing one).
+3. Enable the **Google+ API**.
+4. Under **Credentials**, create an **OAuth 2.0 Client ID**.
+5. Add the authorized redirect URI: `http://localhost:3000/api/v1/auth/google/callback`
+
+```bash
+GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=xxxx
+```
+
+### GitHub OAuth
+
+1. Go to [GitHub Developer Settings](https://github.com/settings/developers).
+2. Create a new **OAuth App**.
+3. Set the callback URL to: `http://localhost:3000/api/v1/auth/github/callback`
+
+```bash
+GITHUB_CLIENT_ID=xxxx
+GITHUB_CLIENT_SECRET=xxxx
+```
+
+## Verifying the Installation
+
+After completing the setup, start the development server and run through these checks.
+
+```bash
+bun dev
+```
+
+<Steps>
+  <Step title="Health check">
+    ```bash
+    curl http://localhost:3000/health
+    ```
+
+    Expected response:
+
+    ```json
+    { "status": "ok", "timestamp": "2025-01-28T..." }
+    ```
+
+  </Step>
+
+<Step title="API documentation">
+  Open [http://localhost:3000/docs](http://localhost:3000/docs) in your browser. You should see the
+  Scalar-powered OpenAPI documentation listing all available endpoints.
+</Step>
+
+  <Step title="Test authentication">
+    If you ran `bun run db:seed`:
+
+    ```bash
+    curl -X POST http://localhost:3000/api/v1/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{"email":"demo@bunship.com","password":"demo123456"}'
+    ```
+
+    A successful response includes `accessToken` and `refreshToken` fields.
+
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title='"Cannot find module" errors'>
+    Clear the workspace and reinstall:
+
+    ```bash
+    bun run clean
+    bun install
+    ```
+
+  </Accordion>
+
+  <Accordion title="Database connection failed">
+    - **File-based database**: Ensure `TURSO_DATABASE_URL=file:../../local.db` is set in your
+      `apps/api/.env` file.
+    - **Turso cloud**: Verify the auth token is still valid:
+
+    ```bash
+    turso db tokens validate YOUR_TOKEN
+    ```
+
+  </Accordion>
+
+  <Accordion title="Redis connection refused">
+    Check that Redis is running and reachable:
+
+    ```bash
+    redis-cli ping
+    # Expected: PONG
+    ```
+
+    If you are using Docker, confirm the container is up:
+
+    ```bash
+    docker ps --filter name=redis
+    ```
+
+  </Accordion>
+
+  <Accordion title="Port 3000 already in use">
+    Find and stop the process occupying the port:
+
+    ```bash
+    lsof -i :3000
+    kill -9 <PID>
+    ```
+
+    Or start BunShip on a different port:
+
+    ```bash
+    PORT=3001 bun dev
+    ```
+
+  </Accordion>
+
+  <Accordion title="JWT errors (token invalid / signature mismatch)">
+    Ensure both secrets are set and at least 32 characters long:
+
+    ```bash
+    echo $JWT_SECRET | wc -c
+    # Should print 33 or more (32 chars + newline)
+    ```
+
+  </Accordion>
+
+  <Accordion title="Stripe webhook signature invalid">
+    Make sure `STRIPE_WEBHOOK_SECRET` matches the secret shown by the Stripe CLI or the
+    Stripe Dashboard. For local development, always use the Stripe CLI:
+
+    ```bash
+    stripe listen --forward-to localhost:3000/webhooks/stripe
+    ```
+
+    The CLI prints a new signing secret each time it starts. Copy it into your `.env`.
+
+  </Accordion>
+</AccordionGroup>
+
+## Complete .env Reference
+
+Below is the full list of environment variables from `.env.example`:
+
+| Variable                             | Required | Default                  | Description                                         |
+| ------------------------------------ | -------- | ------------------------ | --------------------------------------------------- |
+| `NODE_ENV`                           | Yes      | `development`            | Runtime environment                                 |
+| `API_URL`                            | Yes      | `http://localhost:3000`  | Public API URL                                      |
+| `FRONTEND_URL`                       | Yes      | `http://localhost:5173`  | Public frontend URL                                 |
+| `DATABASE_URL`                       | Yes      | `file:./local.db`        | Turso/SQLite connection string                      |
+| `DATABASE_AUTH_TOKEN`                | No       | --                       | Turso cloud auth token                              |
+| `REDIS_HOST`                         | Yes      | `localhost`              | Redis hostname                                      |
+| `REDIS_PORT`                         | Yes      | `6379`                   | Redis port                                          |
+| `REDIS_URL`                          | Yes      | `redis://localhost:6379` | Redis connection URL                                |
+| `JWT_SECRET`                         | Yes      | --                       | Access token signing secret (32+ chars)             |
+| `JWT_REFRESH_SECRET`                 | Yes      | --                       | Refresh token signing secret (32+ chars)            |
+| `STRIPE_SECRET_KEY`                  | No       | --                       | Stripe API secret key                               |
+| `STRIPE_WEBHOOK_SECRET`              | No       | --                       | Stripe webhook signing secret                       |
+| `STRIPE_PRO_MONTHLY_PRICE_ID`        | No       | --                       | Stripe price ID for Pro monthly                     |
+| `STRIPE_PRO_YEARLY_PRICE_ID`         | No       | --                       | Stripe price ID for Pro yearly                      |
+| `STRIPE_ENTERPRISE_MONTHLY_PRICE_ID` | No       | --                       | Stripe price ID for Enterprise monthly              |
+| `STRIPE_ENTERPRISE_YEARLY_PRICE_ID`  | No       | --                       | Stripe price ID for Enterprise yearly               |
+| `RESEND_API_KEY`                     | No       | --                       | Resend email API key                                |
+| `EMAIL_FROM`                         | No       | --                       | Sender address for transactional emails             |
+| `S3_ENDPOINT`                        | No       | --                       | S3-compatible storage endpoint URL                  |
+| `S3_BUCKET`                          | No       | --                       | Storage bucket name                                 |
+| `S3_ACCESS_KEY_ID`                   | No       | --                       | S3 access key                                       |
+| `S3_SECRET_ACCESS_KEY`               | No       | --                       | S3 secret key                                       |
+| `S3_REGION`                          | No       | `us-east-1`              | S3 region                                           |
+| `GOOGLE_CLIENT_ID`                   | No       | --                       | Google OAuth client ID                              |
+| `GOOGLE_CLIENT_SECRET`               | No       | --                       | Google OAuth client secret                          |
+| `GITHUB_CLIENT_ID`                   | No       | --                       | GitHub OAuth client ID                              |
+| `GITHUB_CLIENT_SECRET`               | No       | --                       | GitHub OAuth client secret                          |
+| `TOTP_ISSUER`                        | No       | `BunShip`                | Name shown in authenticator apps                    |
+| `DEMO_MODE`                          | No       | `false`                  | Restricts destructive actions for demo environments |
+| `CRON_SECRET`                        | No       | --                       | Shared secret for cron job endpoints                |
