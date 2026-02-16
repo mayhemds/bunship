@@ -31,7 +31,7 @@
     "@sinclair/typebox": "^0.34.48",
     "bullmq": "^5.4.0",
     "drizzle-orm": "^0.45.1",
-    "elysia": "^1.0.0",
+    "elysia": "^1.4.25",
     "elysia-helmet": "^2.0.0",
     "elysia-rate-limit": "^4.0.0",
     "ioredis": "^5.3.2",
