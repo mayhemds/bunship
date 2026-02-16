@@ -24,7 +24,7 @@
     "react-email": "^2.1.0"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
+    "@types/react": "^18.3.28",
     "typescript": "^5.4.0"
   }
 }
