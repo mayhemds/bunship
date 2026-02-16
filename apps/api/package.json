@@ -25,7 +25,7 @@
     "@bunship/database": "workspace:*",
     "@bunship/emails": "workspace:*",
     "@bunship/utils": "workspace:*",
-    "@elysiajs/cors": "^1.0.0",
+    "@elysiajs/cors": "^1.4.1",
     "@elysiajs/swagger": "^1.0.0",
     "@paralleldrive/cuid2": "^2.2.2",
     "@sinclair/typebox": "^0.34.48",
