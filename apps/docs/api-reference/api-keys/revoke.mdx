@@ -1,0 +1,46 @@
+---
+title: "Revoke API Key"
+api: "DELETE /api/v1/organizations/{orgId}/api-keys/{id}"
+description: "Permanently revoke an API key"
+---
+
+Permanently revokes an API key. Any requests made with this key after revocation will receive a `401` response. This action cannot be undone.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  API key identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Always `true` on success.
+</ResponseField>
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "message": "API key revoked successfully"
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X DELETE https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/api-keys/key_abc123 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

@@ -1,0 +1,87 @@
+version: "3.9"
+
+# ============================================
+# Production Docker Compose Configuration
+# Extends base docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+# ============================================
+
+services:
+  # ============================================
+  # Redis - Production Configuration
+  # ============================================
+  redis:
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # API Service - Production Configuration
+  # ============================================
+  api:
+    restart: always
+    environment:
+      - NODE_ENV=production
+      # NOTE: For production deployments outside Docker networks, use rediss:// (TLS)
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}@redis:6379
+    volumes:
+      # Remove source code mounts (no hot reload in production)
+      - db-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============================================
+  # Worker Service - Production Configuration
+  # ============================================
+  worker:
+    restart: always
+    environment:
+      - NODE_ENV=production
+      # NOTE: For production deployments outside Docker networks, use rediss:// (TLS)
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set for production}@redis:6379
+    # No volumes needed in production (code is baked into image)
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+      replicas: 1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"

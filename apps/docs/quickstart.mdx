@@ -1,0 +1,191 @@
+---
+title: Quickstart
+description: "Get BunShip running in under 5 minutes"
+---
+
+## Prerequisites
+
+Before you begin, make sure you have the following installed:
+
+| Requirement | Minimum Version | Installation                                            |
+| ----------- | --------------- | ------------------------------------------------------- |
+| **Bun**     | 1.1.0+          | [bun.sh](https://bun.sh)                                |
+| **Redis**   | 7.0+            | [redis.io/docs/install](https://redis.io/docs/install/) |
+
+You will also need accounts for these services (free tiers available):
+
+- [Stripe](https://stripe.com) - Payment processing (test mode works without a paid account)
+- [Turso](https://turso.tech) - Cloud database (optional for local development)
+
+<Note>
+  For local development, BunShip uses a file-based SQLite database by default. You only need Turso
+  for cloud/production deployments.
+</Note>
+
+## Setup
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/bunship/bunship.git my-saas
+    cd my-saas
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    BunShip is a monorepo managed with Bun workspaces and Turborepo. A single install pulls in
+    all packages: the API, database layer, email templates, config, utilities, and the Eden
+    type-safe client.
+
+    ```bash
+    bun install
+    ```
+
+  </Step>
+
+  <Step title="Configure environment variables">
+    Copy the example environment file and generate JWT secrets:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Open `.env` and set at minimum these two values to secure random strings:
+
+    ```bash
+    JWT_SECRET=<generate-a-32-char-random-string>
+    JWT_REFRESH_SECRET=<generate-a-different-32-char-random-string>
+    ```
+
+    Generate a secret with:
+
+    ```bash
+    bun -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+    ```
+
+    The remaining defaults (local SQLite database, localhost Redis) work out of the box for
+    development. See the [Installation guide](/installation) for a full breakdown of every
+    environment variable.
+
+  </Step>
+
+  <Step title="Set up the database">
+    Run migrations to create all tables, then optionally seed demo data:
+
+    ```bash
+    bun run db:migrate
+    bun run db:seed   # optional - creates a demo user and organization
+    ```
+
+    If you ran the seed command, you can log in with:
+
+    ```
+    Email:    demo@bunship.com
+    Password: demo123456
+    ```
+
+  </Step>
+
+  <Step title="Start the development server">
+    ```bash
+    bun dev
+    ```
+
+    The API is now running at [http://localhost:3000](http://localhost:3000).
+
+  </Step>
+</Steps>
+
+## Verify It Works
+
+Once the server is running, confirm everything is healthy:
+
+<Tabs>
+  <Tab title="Health check">
+    ```bash
+    curl http://localhost:3000/health
+    ```
+
+    Expected response:
+
+    ```json
+    { "status": "ok", "timestamp": "2025-01-28T..." }
+    ```
+
+  </Tab>
+
+<Tab title="API documentation">
+  Open [http://localhost:3000/docs](http://localhost:3000/docs) in your browser to see the
+  auto-generated OpenAPI documentation powered by Scalar.
+</Tab>
+
+  <Tab title="Test login">
+    If you ran `db:seed`, test authentication with:
+
+    ```bash
+    curl -X POST http://localhost:3000/api/v1/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{"email":"demo@bunship.com","password":"demo123456"}'
+    ```
+
+    You should receive a JSON response containing `accessToken` and `refreshToken`.
+
+  </Tab>
+</Tabs>
+
+## Project Structure
+
+Here is how the monorepo is organized:
+
+```
+bunship/
+├── apps/
+│   ├── api/                 # Main Elysia API
+│   │   ├── src/
+│   │   │   ├── index.ts     # Entry point
+│   │   │   ├── routes/      # API endpoint handlers
+│   │   │   ├── middleware/   # Auth, org, permission middleware
+│   │   │   ├── services/    # Business logic
+│   │   │   └── jobs/        # Background job workers
+│   └── docs/                # This documentation (Mintlify)
+├── packages/
+│   ├── config/              # Shared configuration
+│   ├── database/            # Drizzle schema & migrations
+│   ├── emails/              # Email templates (React Email)
+│   ├── eden/                # Type-safe API client
+│   └── utils/               # Shared utilities
+├── docker/                  # Docker configuration
+├── .env.example             # Environment variable template
+├── package.json             # Workspace root
+└── turbo.json               # Turborepo configuration
+```
+
+## Common Scripts
+
+| Command               | Description                                          |
+| --------------------- | ---------------------------------------------------- |
+| `bun dev`             | Start the API in development mode with file watching |
+| `bun dev:all`         | Start all apps (API + docs) via Turborepo            |
+| `bun run db:generate` | Generate a migration from schema changes             |
+| `bun run db:migrate`  | Apply pending migrations                             |
+| `bun run db:seed`     | Seed demo data                                       |
+| `bun run db:studio`   | Open Drizzle Studio (visual database browser)        |
+| `bun test`            | Run all tests                                        |
+| `bun run build`       | Build all packages for production                    |
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Full environment configuration including Stripe, email, S3 storage, and OAuth providers
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand how BunShip organizes routes, services, and middleware
+  </Card>
+  <Card title="Authentication" icon="lock" href="/concepts/authentication">
+    JWT tokens, 2FA, magic links, and OAuth flows
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/introduction">
+    Interactive documentation for every endpoint
+  </Card>
+</CardGroup>

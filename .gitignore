@@ -1,0 +1,93 @@
+# Dependencies
+node_modules/
+.bun/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+.turbo/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+local.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Pro-only (lives in bunship-pro repo)
+apps/web/
+packages/ui/
+
+# Misc
+*.tgz
+.cache/
+
+# Email dev
+.react-email/
+
+# Mintlify docs
+.mintlify/
+
+# Internal build/review artifacts
+bunship-claude-code-prompt.md
+CI_CD_FILES.txt
+CI_CD_SETUP.md
+IMPLEMENTATION_CHECKLIST.md
+PROJECT_STATUS.md
+ADMIN_IMPLEMENTATION.md
+MIGRATION.md
+CUSTOMIZATION.md
+CODE_REVIEW.md
+REVIEW_REPORT.md
+COMPETITOR_ANALYSIS.md
+TYPESCRIPT_ERRORS.md
+apps/api/IMPLEMENTATION_SUMMARY.md
+SETUP.md
+apps/api/ADMIN_SETUP.md
+apps/api/AUDIT_JOBS_FILES_SUMMARY.md
+apps/api/BILLING_WEBHOOKS_APIKEYS.md
+apps/api/FEATURES.md
+apps/api/QUICK_REFERENCE.md
+docker/ARCHITECTURE.md
+docker/CHECKLIST.md
+docker/DEPLOYMENT.md
+docker/DOCKER-SUMMARY.md
+docker/INDEX.md
+.github/CI_CD.md
+.github/QUICK_REFERENCE.md
+packages/database/SEED.md
+packages/eden/PACKAGE_SUMMARY.md
+packages/eden/QUICKSTART.md
+packages/emails/CHECKLIST.md
+packages/emails/INTEGRATION.md
+packages/emails/QUICKSTART.md
+packages/emails/SUMMARY.md
+
+# Claude orchestration framework (internal tooling)
+.claude/
+CLAUDE.md

@@ -1,0 +1,478 @@
+---
+title: Email Templates
+description: "Customize transactional emails"
+---
+
+BunShip uses [React Email](https://react.email) for templating and [Resend](https://resend.com) for delivery. Templates live in the `packages/emails/` package and render to HTML that works across all major email clients.
+
+## Email Package Overview
+
+```
+packages/emails/
+├── src/
+│   ├── components/
+│   │   └── Layout.tsx          # Shared header, footer, and styles
+│   ├── templates/
+│   │   ├── welcome.tsx         # Post-registration welcome
+│   │   ├── verify-email.tsx    # Email address verification
+│   │   ├── reset-password.tsx  # Password reset link
+│   │   ├── team-invite.tsx     # Organization invitation
+│   │   ├── invoice.tsx         # Payment receipt
+│   │   └── subscription-canceled.tsx  # Cancellation confirmation
+│   └── index.ts                # Public exports
+├── package.json
+└── tsconfig.json
+```
+
+Emails are sent through a BullMQ background job queue, so sending never blocks API responses.
+
+## Available Templates
+
+BunShip ships with six templates that cover the core SaaS transactional email flows.
+
+### Welcome Email
+
+Sent after a user registers. Includes a link to the dashboard.
+
+```typescript
+import { WelcomeEmail } from "@bunship/emails";
+
+<WelcomeEmail
+  name="John Doe"
+  dashboardUrl="https://app.yourdomain.com/dashboard"
+/>
+```
+
+### Verify Email
+
+Sent to confirm an email address. Includes a verification link and a resend option.
+
+```typescript
+import { VerifyEmail } from "@bunship/emails";
+
+<VerifyEmail
+  name="John Doe"
+  verificationUrl="https://app.yourdomain.com/verify?token=abc123"
+  resendUrl="https://app.yourdomain.com/resend-verification"
+/>
+```
+
+### Reset Password
+
+Sent when a user requests a password reset.
+
+```typescript
+import { ResetPasswordEmail } from "@bunship/emails";
+
+<ResetPasswordEmail
+  name="John Doe"
+  resetUrl="https://app.yourdomain.com/reset-password?token=xyz789"
+/>
+```
+
+### Team Invite
+
+Sent when a team member is invited to join an organization.
+
+```typescript
+import { TeamInviteEmail } from "@bunship/emails";
+
+<TeamInviteEmail
+  inviteeName="Jane Smith"
+  inviterName="John Doe"
+  organizationName="Acme Corp"
+  role="developer"
+  inviteUrl="https://app.yourdomain.com/accept-invite?token=inv123"
+/>
+```
+
+### Invoice
+
+Sent after a successful payment.
+
+```typescript
+import { InvoiceEmail } from "@bunship/emails";
+
+<InvoiceEmail
+  name="John Doe"
+  invoiceNumber="INV-2024-001"
+  amount="49.00"
+  currency="USD"
+  planName="Pro Plan"
+  billingPeriod="Jan 1 - Jan 31, 2024"
+  paymentDate="January 1, 2024"
+  invoiceUrl="https://app.yourdomain.com/invoices/inv-001"
+  portalUrl="https://app.yourdomain.com/billing"
+/>
+```
+
+### Subscription Canceled
+
+Sent when a user cancels their subscription.
+
+```typescript
+import { SubscriptionCanceledEmail } from "@bunship/emails";
+
+<SubscriptionCanceledEmail
+  name="John Doe"
+  planName="Pro Plan"
+  accessEndDate="January 31, 2024"
+  resubscribeUrl="https://app.yourdomain.com/resubscribe"
+  feedbackUrl="https://app.yourdomain.com/feedback"
+/>
+```
+
+## Template Structure
+
+Every template follows the same pattern: a props interface, a React component, and inline styles.
+
+```typescript
+// packages/emails/src/templates/welcome.tsx
+import {
+  Body,
+  Container,
+  Head,
+  Heading,
+  Html,
+  Link,
+  Preview,
+  Text,
+} from "@react-email/components";
+import { appConfig } from "@bunship/config";
+
+interface WelcomeEmailProps {
+  name: string;
+  dashboardUrl: string;
+}
+
+export function WelcomeEmail({ name, dashboardUrl }: WelcomeEmailProps) {
+  return (
+    <Html>
+      <Head />
+      <Preview>Welcome to {appConfig.name}</Preview>
+      <Body style={main}>
+        <Container style={container}>
+          <Heading style={heading}>
+            Welcome, {name}!
+          </Heading>
+          <Text style={text}>
+            Thanks for signing up. Your account is ready.
+          </Text>
+          <Link href={dashboardUrl} style={button}>
+            Go to Dashboard
+          </Link>
+        </Container>
+      </Body>
+    </Html>
+  );
+}
+```
+
+### The Layout Component
+
+All built-in templates use a shared `Layout` component that provides consistent branding, a header with your logo, and a footer with your company details.
+
+```typescript
+import { Layout } from "../components/Layout";
+
+export function MyEmail({ name }: Props) {
+  return (
+    <Layout previewText="Preview text for inbox snippets">
+      {/* Your email content goes here */}
+    </Layout>
+  );
+}
+```
+
+Edit `packages/emails/src/components/Layout.tsx` to change:
+
+- Brand logo URL and dimensions
+- Header background color
+- Footer text and links
+- Default font family
+
+## Creating a Custom Template
+
+<Steps>
+  <Step title="Create the template file">
+    Add a new file in `packages/emails/src/templates/`:
+
+    ```typescript
+    // packages/emails/src/templates/usage-alert.tsx
+    import { Text, Section, Button } from "@react-email/components";
+    import { Layout } from "../components/Layout";
+    import { appConfig } from "@bunship/config";
+
+    export interface UsageAlertEmailProps {
+      name: string;
+      resourceName: string;
+      currentUsage: number;
+      limit: number;
+      upgradeUrl: string;
+    }
+
+    export function UsageAlertEmail({
+      name,
+      resourceName,
+      currentUsage,
+      limit,
+      upgradeUrl,
+    }: UsageAlertEmailProps) {
+      const percentage = Math.round((currentUsage / limit) * 100);
+
+      return (
+        <Layout previewText={`${resourceName} usage at ${percentage}%`}>
+          <Section>
+            <Text style={heading}>Usage Alert</Text>
+
+            <Text style={paragraph}>
+              Hi {name},
+            </Text>
+
+            <Text style={paragraph}>
+              Your {resourceName} usage has reached{" "}
+              <strong>{percentage}%</strong> of your plan limit
+              ({currentUsage.toLocaleString()} of{" "}
+              {limit.toLocaleString()}).
+            </Text>
+
+            <Text style={paragraph}>
+              To avoid service interruptions, consider upgrading
+              your plan.
+            </Text>
+
+            <Button style={button} href={upgradeUrl}>
+              Upgrade Plan
+            </Button>
+
+            <Text style={footer}>
+              You are receiving this because usage alerts are
+              enabled for your {appConfig.name} account.
+            </Text>
+          </Section>
+        </Layout>
+      );
+    }
+
+    const heading = {
+      fontSize: "24px",
+      fontWeight: "bold" as const,
+      margin: "0 0 24px",
+    };
+
+    const paragraph = {
+      fontSize: "16px",
+      lineHeight: "26px",
+      margin: "0 0 16px",
+    };
+
+    const button = {
+      backgroundColor: "#5046e5",
+      borderRadius: "6px",
+      color: "#fff",
+      display: "block" as const,
+      fontSize: "16px",
+      fontWeight: "bold" as const,
+      textAlign: "center" as const,
+      textDecoration: "none",
+      padding: "12px 24px",
+      margin: "24px 0",
+    };
+
+    const footer = {
+      fontSize: "14px",
+      color: "#666",
+      marginTop: "32px",
+    };
+    ```
+
+  </Step>
+
+  <Step title="Export from the package">
+    Add the export to `packages/emails/src/index.ts`:
+
+    ```typescript
+    export { UsageAlertEmail } from "./templates/usage-alert";
+    export type { UsageAlertEmailProps } from "./templates/usage-alert";
+    ```
+
+  </Step>
+
+  <Step title="Send the email from your API">
+    Use the email queue to send asynchronously:
+
+    ```typescript
+    import { renderEmail, UsageAlertEmail } from "@bunship/emails";
+
+    const html = await renderEmail(
+      UsageAlertEmail({
+        name: user.fullName ?? "there",
+        resourceName: "API requests",
+        currentUsage: 8500,
+        limit: 10000,
+        upgradeUrl: `${appConfig.frontendUrl}/billing/upgrade`,
+      })
+    );
+
+    await emailQueue.add("send", {
+      to: user.email,
+      subject: "Usage alert: API requests at 85%",
+      html,
+    });
+    ```
+
+  </Step>
+</Steps>
+
+## Rendering Emails
+
+The `@bunship/emails` package exports two render functions:
+
+### HTML Rendering
+
+```typescript
+import { renderEmail, WelcomeEmail } from "@bunship/emails";
+
+const html = await renderEmail(
+  WelcomeEmail({
+    name: "John Doe",
+    dashboardUrl: "https://app.yourdomain.com/dashboard",
+  })
+);
+```
+
+### Plain Text Rendering
+
+For email clients that do not support HTML:
+
+```typescript
+import { renderEmailText, WelcomeEmail } from "@bunship/emails";
+
+const text = await renderEmailText(
+  WelcomeEmail({
+    name: "John Doe",
+    dashboardUrl: "https://app.yourdomain.com/dashboard",
+  })
+);
+```
+
+## Sending with Resend
+
+BunShip sends emails through Resend via the background job queue. The queue is configured in `featuresConfig.jobs.queues.email`:
+
+```typescript
+// Direct send (not recommended for API routes)
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+await resend.emails.send({
+  from: `${appConfig.name} <noreply@yourdomain.com>`,
+  to: "user@example.com",
+  subject: "Welcome!",
+  html,
+});
+```
+
+```typescript
+// Queue-based send (recommended)
+await emailQueue.add("send", {
+  to: user.email,
+  subject: "Welcome to " + appConfig.name,
+  html,
+});
+```
+
+<Tip>
+  Always use the queue for sending emails from API route handlers. This keeps response times fast
+  and handles retries automatically if the email provider is temporarily unavailable.
+</Tip>
+
+## Testing Emails Locally
+
+React Email includes a development server that renders your templates in the browser with hot reload.
+
+```bash
+cd packages/emails
+bun run dev
+```
+
+This starts a preview server at `http://localhost:3000` where you can:
+
+- Browse all templates in a sidebar
+- Preview with sample data
+- Toggle between desktop and mobile widths
+- View the raw HTML output
+
+### Sending Test Emails
+
+To send a real test email through Resend (requires a valid API key):
+
+```typescript
+import { renderEmail, WelcomeEmail } from "@bunship/emails";
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+const html = await renderEmail(
+  WelcomeEmail({
+    name: "Test User",
+    dashboardUrl: "http://localhost:5173/dashboard",
+  })
+);
+
+await resend.emails.send({
+  from: "test@yourdomain.com",
+  to: "your-email@example.com",
+  subject: "[TEST] Welcome Email",
+  html,
+});
+```
+
+## Styling Guidelines
+
+Email clients have limited and inconsistent CSS support. Follow these rules for reliable rendering:
+
+<AccordionGroup>
+  <Accordion title="Use inline styles only">
+    Email clients strip `<style>` tags and ignore external stylesheets. Define styles as JavaScript objects and apply them via the `style` prop.
+
+    ```typescript
+    const heading = {
+      fontSize: "24px",
+      fontWeight: "bold" as const,
+      margin: "0 0 24px",
+    };
+
+    <Text style={heading}>Hello</Text>
+    ```
+
+  </Accordion>
+
+  <Accordion title="Stick to web-safe fonts">
+    Use system font stacks that work everywhere:
+
+    ```typescript
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    ```
+
+  </Accordion>
+
+  <Accordion title="Keep layouts simple">
+    Avoid complex CSS layouts (flexbox, grid). Use React Email's `<Section>`, `<Row>`, and `<Column>` components for multi-column layouts.
+  </Accordion>
+
+  <Accordion title="Test across clients">
+    The built-in templates are tested across Gmail, Outlook, Apple Mail, Yahoo Mail, and Thunderbird. Test your custom templates in the same clients before deploying.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Adding Routes" icon="route" href="/customization/adding-routes">
+    Trigger your new emails from API endpoints
+  </Card>
+  <Card title="OAuth Providers" icon="key" href="/customization/oauth-providers">
+    Add social login to your authentication flow
+  </Card>
+</CardGroup>

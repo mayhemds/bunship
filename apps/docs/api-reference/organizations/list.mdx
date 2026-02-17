@@ -1,0 +1,72 @@
+---
+title: "List Organizations"
+api: "GET /api/v1/users/me/organizations"
+description: "List all organizations the current user belongs to"
+---
+
+Returns all organizations where the authenticated user has a membership, along with their role in each organization.
+
+## Auth
+
+<Note>Requires a valid Bearer token.</Note>
+
+## Response
+
+<ResponseField name="organizations" type="array">
+  Array of organization membership objects.
+
+  <Expandable title="organization properties">
+    <ResponseField name="id" type="string">Organization identifier.</ResponseField>
+    <ResponseField name="name" type="string">Organization name.</ResponseField>
+    <ResponseField name="slug" type="string">URL slug.</ResponseField>
+    <ResponseField name="logoUrl" type="string | null">Logo URL.</ResponseField>
+    <ResponseField name="role" type="string">User's role: `"owner"`, `"admin"`, `"member"`, or `"viewer"`.</ResponseField>
+    <ResponseField name="membershipId" type="string">Membership record identifier.</ResponseField>
+    <ResponseField name="joinedAt" type="string">ISO 8601 timestamp of when the user joined.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="number">
+  Total number of organizations.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "organizations": [
+    {
+      "id": "org_cld2abc123def456",
+      "name": "Acme Corp",
+      "slug": "acme-corp",
+      "logoUrl": "https://cdn.bunship.com/logos/acme.png",
+      "role": "owner",
+      "membershipId": "mbr_abc123",
+      "joinedAt": "2024-01-15T10:00:00Z"
+    },
+    {
+      "id": "org_xyz789ghi012345",
+      "name": "Widget Labs",
+      "slug": "widget-labs",
+      "logoUrl": null,
+      "role": "member",
+      "membershipId": "mbr_def456",
+      "joinedAt": "2024-02-01T14:30:00Z"
+    }
+  ],
+  "total": 2
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                     |
+| ------ | ---------------------- | ------------------------------- |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token |
+
+## Example
+
+```bash
+curl https://api.bunship.com/api/v1/users/me/organizations \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

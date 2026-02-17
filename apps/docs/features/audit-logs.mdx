@@ -1,0 +1,229 @@
+---
+title: "Audit Logs"
+description: "Track all actions in your organization"
+---
+
+BunShip records every significant action in an append-only audit log. Each entry captures who did what, when, and what changed -- providing a full trail for debugging, compliance, and security reviews.
+
+## What Gets Logged
+
+Every audit log entry contains these fields:
+
+| Field            | Type                                  | Description                                                |
+| ---------------- | ------------------------------------- | ---------------------------------------------------------- |
+| `id`             | string                                | Unique log entry ID                                        |
+| `organizationId` | string                                | Organization where the action occurred                     |
+| `actorId`        | string                                | ID of the user, API key, or system process                 |
+| `actorType`      | `"user"` \| `"api_key"` \| `"system"` | What performed the action                                  |
+| `actorEmail`     | string                                | Email of the user (if `actorType` is `user`)               |
+| `action`         | string                                | Action identifier (e.g., `organization.updated`)           |
+| `resourceType`   | string                                | Type of resource affected (e.g., `organization`, `member`) |
+| `resourceId`     | string                                | ID of the affected resource                                |
+| `oldValues`      | object                                | Previous state of changed fields                           |
+| `newValues`      | object                                | New state of changed fields                                |
+| `ipAddress`      | string                                | Client IP address                                          |
+| `userAgent`      | string                                | Client user agent string                                   |
+| `metadata`       | object                                | Additional context                                         |
+| `createdAt`      | timestamp                             | When the action occurred                                   |
+
+### Example entry
+
+```json
+{
+  "id": "log_abc123",
+  "organizationId": "org_xyz789",
+  "actorId": "user_123",
+  "actorType": "user",
+  "actorEmail": "admin@example.com",
+  "action": "organization.updated",
+  "resourceType": "organization",
+  "resourceId": "org_xyz789",
+  "oldValues": { "name": "Acme Corp" },
+  "newValues": { "name": "Acme Inc" },
+  "ipAddress": "203.0.113.42",
+  "userAgent": "Mozilla/5.0 ...",
+  "metadata": null,
+  "createdAt": "2025-03-15T14:22:00.000Z"
+}
+```
+
+## Creating Audit Log Entries
+
+The audit service provides typed helper methods for different actor types.
+
+### User actions
+
+```typescript
+await auditService.logUserAction({
+  organizationId: "org_123",
+  userId: "user_123",
+  userEmail: "user@example.com",
+  action: "organization.updated",
+  resourceType: "organization",
+  resourceId: "org_123",
+  oldValues: { name: "Old Name" },
+  newValues: { name: "New Name" },
+  ipAddress: "203.0.113.42",
+  userAgent: "Mozilla/5.0 ...",
+});
+```
+
+### API key actions
+
+```typescript
+await auditService.logApiKeyAction({
+  organizationId: "org_123",
+  apiKeyId: "key_456",
+  action: "project.created",
+  resourceType: "project",
+  resourceId: "proj_789",
+  ipAddress: "203.0.113.42",
+});
+```
+
+### System actions
+
+```typescript
+await auditService.logSystemAction({
+  organizationId: "org_123",
+  action: "subscription.renewed",
+  resourceType: "subscription",
+  resourceId: "sub_abc",
+  metadata: { planId: "pro", period: "monthly" },
+});
+```
+
+## Querying Audit Logs
+
+List audit logs with filters, pagination, and date ranges:
+
+```bash
+curl "https://api.example.com/api/v1/audit-logs?action=organization.updated&limit=50&offset=0" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Available filters
+
+| Parameter      | Type     | Description                                        |
+| -------------- | -------- | -------------------------------------------------- |
+| `actorId`      | string   | Filter by actor ID                                 |
+| `actorType`    | string   | Filter by actor type (`user`, `api_key`, `system`) |
+| `action`       | string   | Filter by action (e.g., `member.added`)            |
+| `resourceType` | string   | Filter by resource type (e.g., `organization`)     |
+| `resourceId`   | string   | Filter by specific resource                        |
+| `startDate`    | ISO date | Entries after this date                            |
+| `endDate`      | ISO date | Entries before this date                           |
+| `limit`        | number   | Results per page (default: 50)                     |
+| `offset`       | number   | Pagination offset (default: 0)                     |
+
+### Response format
+
+```json
+{
+  "logs": [
+    {
+      "id": "log_abc123",
+      "actorType": "user",
+      "actorEmail": "admin@example.com",
+      "action": "organization.updated",
+      "resourceType": "organization",
+      "resourceId": "org_xyz789",
+      "createdAt": "2025-03-15T14:22:00.000Z"
+    }
+  ],
+  "total": 142,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+The `total` field returns the full count of matching entries, so your frontend can calculate page numbers.
+
+### Filtering by date range
+
+```typescript
+const { logs, total } = await auditService.list("org_123", {
+  actorType: "user",
+  action: "organization.updated",
+  startDate: new Date("2025-01-01"),
+  endDate: new Date("2025-03-31"),
+  limit: 50,
+  offset: 0,
+});
+```
+
+## Log Retention
+
+Audit logs are cleaned up automatically by the [background jobs](/features/background-jobs) system. Retention periods depend on your plan:
+
+| Plan       | Retention     |
+| ---------- | ------------- |
+| Free       | Not available |
+| Pro        | 30 days       |
+| Enterprise | 1 year        |
+
+The cleanup worker runs weekly and removes entries older than the configured threshold:
+
+```typescript
+await addCleanupJob(
+  {
+    task: "old-audit-logs",
+    daysToKeep: 90,
+  },
+  {
+    repeat: {
+      cron: "0 3 * * 0", // Weekly on Sunday at 3 AM
+    },
+    jobId: "cleanup-old-audit-logs",
+  }
+);
+```
+
+<Info>
+  Adjust the `daysToKeep` value in `apps/api/src/jobs/index.ts` to change the retention period.
+</Info>
+
+## Integration with Other Features
+
+Audit logs are created automatically throughout BunShip. Here are the key integration points:
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock">
+    Login attempts, password changes, 2FA setup, and session revocations are logged with the user's
+    IP address and user agent.
+  </Card>
+  <Card title="Team Management" icon="users">
+    Member invitations, role changes, and removals record both the actor and the affected member.
+  </Card>
+  <Card title="Billing" icon="credit-card">
+    Subscription changes, checkout completions, and cancellations are logged as system actions
+    triggered by Stripe webhooks.
+  </Card>
+  <Card title="API Keys" icon="key">
+    Key creation and revocation are logged. Requests authenticated with API keys use `actorType:
+    "api_key"` for attribution.
+  </Card>
+</CardGroup>
+
+### Adding audit logs to custom routes
+
+When building new features, add audit logging at the service layer:
+
+```typescript
+import { auditService } from "../services/audit.service";
+
+// After performing the action
+await auditService.logUserAction({
+  organizationId: org.id,
+  userId: user.id,
+  userEmail: user.email,
+  action: "custom_resource.created",
+  resourceType: "custom_resource",
+  resourceId: newResource.id,
+  newValues: { name: newResource.name },
+  ipAddress: request.ip,
+  userAgent: request.headers.get("user-agent") ?? undefined,
+});
+```
+
+The audit service catches and logs its own errors internally, so a failure to write an audit entry will not break the primary operation. Errors are printed to `stderr` and an `InternalError` is thrown, which the global error handler catches.

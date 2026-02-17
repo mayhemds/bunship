@@ -1,0 +1,86 @@
+---
+title: "Get Organization"
+api: "GET /api/v1/organizations/{orgId}"
+description: "Get details of a specific organization"
+---
+
+Returns the full details of an organization. The authenticated user must be a member of the organization.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="string">
+  Organization identifier.
+</ResponseField>
+<ResponseField name="name" type="string">
+  Organization name.
+</ResponseField>
+<ResponseField name="slug" type="string">
+  URL slug.
+</ResponseField>
+<ResponseField name="description" type="string | null">
+  Description.
+</ResponseField>
+<ResponseField name="logoUrl" type="string | null">
+  Logo URL.
+</ResponseField>
+<ResponseField name="settings" type="object">
+  Organization settings including branding, features, and billing configuration.
+</ResponseField>
+<ResponseField name="createdBy" type="string">
+  User ID of the creator.
+</ResponseField>
+<ResponseField name="createdAt" type="string">
+  ISO 8601 creation timestamp.
+</ResponseField>
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 last update timestamp.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "id": "org_cld2abc123def456",
+  "name": "Acme Corp",
+  "slug": "acme-corp",
+  "description": "Building the future of widgets",
+  "logoUrl": "https://cdn.bunship.com/logos/acme.png",
+  "settings": {
+    "branding": {
+      "primaryColor": "#5046E5"
+    },
+    "features": {
+      "webhooks": true,
+      "apiAccess": true
+    }
+  },
+  "createdBy": "usr_cld2abc123def456",
+  "createdAt": "2024-01-15T10:00:00Z",
+  "updatedAt": "2024-01-20T14:30:00Z"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                               |
+| ------ | ---------------------- | ----------------------------------------- |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token           |
+| `403`  | `AUTHORIZATION_ERROR`  | User is not a member of this organization |
+| `404`  | `NOT_FOUND`            | Organization not found                    |
+
+## Example
+
+```bash
+curl https://api.bunship.com/api/v1/organizations/org_cld2abc123def456 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

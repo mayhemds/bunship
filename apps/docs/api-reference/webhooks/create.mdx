@@ -1,0 +1,67 @@
+---
+title: "Create Webhook Endpoint"
+api: "POST /api/v1/organizations/{orgId}/webhooks"
+description: "Register a new webhook endpoint"
+---
+
+Creates a new webhook endpoint for the organization. A signing secret is generated automatically and returned in the response. Store the secret securely -- it is only shown once and is used to verify webhook signatures.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Request Body
+
+<ParamField body="url" type="string" required>
+  Webhook delivery URL. Must be a valid HTTPS URI.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description of what this webhook endpoint is used for.
+</ParamField>
+
+<ParamField body="events" type="string[]">
+  Array of event types to subscribe to. If omitted or empty, the endpoint receives all events.
+</ParamField>
+
+## Response
+
+Returns the created webhook endpoint including the signing secret.
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": {
+    "id": "wh_abc123",
+    "organizationId": "org_cld2abc123def456",
+    "url": "https://example.com/webhooks/bunship",
+    "description": "Production webhook handler",
+    "events": ["member.added", "member.removed"],
+    "secret": "whsec_abc123def456...",
+    "isActive": true,
+    "createdAt": "2024-01-15T10:00:00Z",
+    "updatedAt": "2024-01-15T10:00:00Z"
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/webhooks \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/webhooks/bunship",
+    "description": "Production webhook handler",
+    "events": ["member.added", "member.removed"]
+  }'
+```

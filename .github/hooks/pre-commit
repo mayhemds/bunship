@@ -1,0 +1,49 @@
+#!/bin/sh
+# Pre-commit hook for BunShip
+# Install: cp .github/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Check if bun is installed
+if ! command -v bun &> /dev/null; then
+    echo "${RED}✗ Bun is not installed${NC}"
+    echo "Install from: https://bun.sh"
+    exit 1
+fi
+
+echo "${BLUE}→ Checking code formatting...${NC}"
+if ! bun run format:check; then
+    echo "${YELLOW}⚠ Formatting issues found. Running formatter...${NC}"
+    bun run format
+    echo "${GREEN}✓ Code formatted${NC}"
+    echo "${YELLOW}Please review changes and commit again${NC}"
+    exit 1
+fi
+echo "${GREEN}✓ Code formatting OK${NC}"
+
+echo "${BLUE}→ Running linter...${NC}"
+if ! bun run lint; then
+    echo "${RED}✗ Linting failed${NC}"
+    echo "${YELLOW}Try: bun run lint:fix${NC}"
+    exit 1
+fi
+echo "${GREEN}✓ Linting passed${NC}"
+
+echo "${BLUE}→ Type checking...${NC}"
+if ! bun run typecheck; then
+    echo "${RED}✗ Type checking failed${NC}"
+    exit 1
+fi
+echo "${GREEN}✓ Type checking passed${NC}"
+
+echo "${GREEN}✓ All pre-commit checks passed${NC}"
+exit 0

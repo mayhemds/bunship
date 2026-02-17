@@ -1,0 +1,75 @@
+---
+title: "Update Webhook Endpoint"
+api: "PATCH /api/v1/organizations/{orgId}/webhooks/{id}"
+description: "Update an existing webhook endpoint"
+---
+
+Updates an existing webhook endpoint's configuration. Only included fields are modified.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Webhook endpoint identifier.
+</ParamField>
+
+## Request Body
+
+All fields are optional.
+
+<ParamField body="url" type="string">
+  Updated webhook delivery URL. Must be a valid HTTPS URI.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Updated description.
+</ParamField>
+
+<ParamField body="events" type="string[]">
+  Updated list of subscribed event types.
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Set to `false` to pause deliveries, `true` to resume.
+</ParamField>
+
+## Response
+
+Returns the updated webhook endpoint object.
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": {
+    "id": "wh_abc123",
+    "organizationId": "org_cld2abc123def456",
+    "url": "https://example.com/webhooks/bunship-v2",
+    "description": "Updated webhook handler",
+    "events": ["member.added", "member.removed", "subscription.updated"],
+    "isActive": true,
+    "createdAt": "2024-01-15T10:00:00Z",
+    "updatedAt": "2024-01-21T09:00:00Z"
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X PATCH https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/webhooks/wh_abc123 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/webhooks/bunship-v2",
+    "events": ["member.added", "member.removed", "subscription.updated"]
+  }'
+```

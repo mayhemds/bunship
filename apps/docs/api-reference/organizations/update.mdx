@@ -1,0 +1,103 @@
+---
+title: "Update Organization"
+api: "PATCH /api/v1/organizations/{orgId}"
+description: "Update organization details"
+---
+
+Updates an organization's details. Only included fields are modified. Settings are merged with existing values. Requires the `org:update` permission (available to owners and admins).
+
+## Auth
+
+<Note>Requires a valid Bearer token with `org:update` permission.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Request Body
+
+All fields are optional. Include only the fields you want to change.
+
+<ParamField body="name" type="string">
+  Updated organization name. Between 1 and 100 characters.
+</ParamField>
+
+<ParamField body="description" type="string | null">
+  Updated description. Maximum 500 characters. Set to `null` to remove.
+</ParamField>
+
+<ParamField body="logoUrl" type="string | null">
+  Updated logo URL. Must be a valid URI. Set to `null` to remove.
+</ParamField>
+
+<ParamField body="settings" type="object">
+  Partial settings object. Merged with existing settings.
+
+  <Expandable title="settings properties">
+    <ParamField body="settings.branding" type="object">
+      Branding configuration with optional `primaryColor` and `accentColor` strings.
+    </ParamField>
+    <ParamField body="settings.features" type="object">
+      Feature flags with optional `webhooks`, `apiAccess`, and `customDomain` booleans.
+    </ParamField>
+    <ParamField body="settings.billing" type="object">
+      Billing settings with optional `email` and `taxId` strings.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+Returns the full updated organization object. See [Get Organization](/api-reference/organizations/get) for the complete response schema.
+
+<ResponseExample>
+```json 200
+{
+  "id": "org_cld2abc123def456",
+  "name": "Acme Corporation",
+  "slug": "acme-corp",
+  "description": "Building the future of widgets since 2024",
+  "logoUrl": "https://cdn.bunship.com/logos/acme-v2.png",
+  "settings": {
+    "branding": {
+      "primaryColor": "#4338CA",
+      "accentColor": "#818CF8"
+    },
+    "features": {
+      "webhooks": true,
+      "apiAccess": true
+    }
+  },
+  "createdBy": "usr_cld2abc123def456",
+  "createdAt": "2024-01-15T10:00:00Z",
+  "updatedAt": "2024-01-21T09:00:00Z"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                      |
+| ------ | ---------------------- | ------------------------------------------------ |
+| `400`  | `VALIDATION_ERROR`     | Invalid field value                              |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                  |
+| `403`  | `AUTHORIZATION_ERROR`  | Insufficient permissions (`org:update` required) |
+| `404`  | `NOT_FOUND`            | Organization not found                           |
+
+## Example
+
+```bash
+curl -X PATCH https://api.bunship.com/api/v1/organizations/org_cld2abc123def456 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Corporation",
+    "settings": {
+      "branding": {
+        "primaryColor": "#4338CA"
+      }
+    }
+  }'
+```

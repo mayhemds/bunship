@@ -1,0 +1,64 @@
+---
+title: "Accept Invitation"
+api: "POST /api/v1/invitations/{token}/accept"
+description: "Accept an organization invitation"
+---
+
+Accepts an invitation using the token from the invite link. The authenticated user must be logged in with the same email address as the invitation. On success, a new membership is created with the role specified in the invitation.
+
+## Auth
+
+<Note>
+  Requires a valid Bearer token. The authenticated user's email must match the invitation email.
+</Note>
+
+## Path Parameters
+
+<ParamField path="token" type="string" required>
+  Invitation token from the invite URL.
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseField name="organization" type="object">
+  The joined organization's basic details.
+
+  <Expandable title="organization properties">
+    <ResponseField name="id" type="string">Organization identifier.</ResponseField>
+    <ResponseField name="name" type="string">Organization name.</ResponseField>
+    <ResponseField name="slug" type="string">Organization URL slug.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Invitation accepted successfully",
+  "organization": {
+    "id": "org_cld2abc123def456",
+    "name": "Acme Corp",
+    "slug": "acme-corp"
+  }
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                                             |
+| ------ | ---------------------- | ----------------------------------------------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Invitation is expired, email mismatch, or organization no longer exists |
+| `401`  | `AUTHENTICATION_ERROR` | Not authenticated -- must sign up or log in first                       |
+| `404`  | `NOT_FOUND`            | Invalid or already-used invitation token                                |
+| `409`  | `CONFLICT`             | User is already a member of this organization                           |
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/invitations/tok_abc123def456.../accept \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

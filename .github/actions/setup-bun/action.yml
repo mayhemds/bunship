@@ -1,0 +1,66 @@
+name: "Setup Bun with Cache"
+description: "Set up Bun with intelligent caching for dependencies"
+author: "BunShip Team"
+
+inputs:
+  bun-version:
+    description: "Bun version to install"
+    required: false
+    default: "1.1.0"
+  install-deps:
+    description: "Install dependencies after setup"
+    required: false
+    default: "true"
+  frozen-lockfile:
+    description: "Use frozen lockfile for install"
+    required: false
+    default: "true"
+
+outputs:
+  cache-hit:
+    description: "Whether the cache was hit"
+    value: ${{ steps.bun-cache.outputs.cache-hit }}
+  bun-version:
+    description: "Installed Bun version"
+    value: ${{ steps.setup-bun.outputs.bun-version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Bun
+      id: setup-bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    - name: Get Bun cache directory
+      id: bun-cache-dir
+      shell: bash
+      run: echo "dir=$(bun pm cache)" >> $GITHUB_OUTPUT
+
+    - name: Cache Bun dependencies
+      id: bun-cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.bun-cache-dir.outputs.dir }}
+          node_modules
+          .turbo
+        key: ${{ runner.os }}-bun-${{ inputs.bun-version }}-${{ hashFiles('**/bun.lockb') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-${{ inputs.bun-version }}-
+          ${{ runner.os }}-bun-
+
+    - name: Install dependencies
+      if: inputs.install-deps == 'true'
+      shell: bash
+      run: |
+        if [ "${{ inputs.frozen-lockfile }}" == "true" ]; then
+          bun install --frozen-lockfile
+        else
+          bun install
+        fi
+
+branding:
+  icon: "package"
+  color: "orange"

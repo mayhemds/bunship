@@ -1,0 +1,72 @@
+---
+title: "Create Checkout Session"
+api: "POST /api/v1/organizations/{orgId}/billing/checkout"
+description: "Create a Stripe Checkout session to subscribe to a plan"
+---
+
+Creates a Stripe Checkout session for the organization to subscribe to a pricing plan. Returns a session URL to redirect the user to Stripe's hosted checkout page.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Request Body
+
+<ParamField body="priceId" type="string" required>
+  Stripe Price ID for the plan to subscribe to (e.g., `"price_1abc123"`).
+</ParamField>
+
+<ParamField body="successUrl" type="string">
+  URL to redirect to after successful checkout. Must match the configured application origin.
+</ParamField>
+
+<ParamField body="cancelUrl" type="string">
+  URL to redirect to if the user cancels checkout. Must match the configured application origin.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Always `true` on success.
+</ResponseField>
+<ResponseField name="data" type="object">
+  <Expandable title="data properties">
+    <ResponseField name="sessionId" type="string">
+      Stripe Checkout session ID.
+    </ResponseField>
+    <ResponseField name="url" type="string">
+      Redirect URL for the hosted checkout page.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": {
+    "sessionId": "cs_live_abc123...",
+    "url": "https://checkout.stripe.com/c/pay/cs_live_abc123..."
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/billing/checkout \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "priceId": "price_1abc123",
+    "successUrl": "https://app.bunship.com/billing?success=true",
+    "cancelUrl": "https://app.bunship.com/billing"
+  }'
+```

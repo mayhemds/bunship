@@ -1,0 +1,96 @@
+---
+title: "List Deliveries"
+api: "GET /api/v1/organizations/{orgId}/webhooks/{id}/deliveries"
+description: "Get delivery history for a webhook endpoint"
+---
+
+Returns the delivery history for a webhook endpoint, including payload, response status, and retry information.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Webhook endpoint identifier.
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="limit" type="number" default={50}>
+  Number of deliveries to return. Between 1 and 100.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="data" type="array">
+  Array of delivery objects.
+
+  <Expandable title="delivery properties">
+    <ResponseField name="id" type="string">Delivery identifier.</ResponseField>
+    <ResponseField name="webhookId" type="string">Webhook endpoint identifier.</ResponseField>
+    <ResponseField name="event" type="string">Event type that triggered this delivery.</ResponseField>
+    <ResponseField name="payload" type="object">The event payload that was delivered.</ResponseField>
+    <ResponseField name="response" type="string | null">Response body from the target endpoint.</ResponseField>
+    <ResponseField name="statusCode" type="number | null">HTTP status code from the target endpoint.</ResponseField>
+    <ResponseField name="attempts" type="number">Number of delivery attempts.</ResponseField>
+    <ResponseField name="nextRetryAt" type="string | null">ISO 8601 timestamp of the next retry, or `null` if no retry is pending.</ResponseField>
+    <ResponseField name="deliveredAt" type="string | null">ISO 8601 timestamp of successful delivery, or `null` if not yet delivered.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": [
+    {
+      "id": "del_abc123",
+      "webhookId": "wh_abc123",
+      "event": "member.added",
+      "payload": {
+        "memberId": "mbr_def456",
+        "organizationId": "org_cld2abc123def456",
+        "userId": "usr_xyz789",
+        "role": "member"
+      },
+      "response": "{\"received\": true}",
+      "statusCode": 200,
+      "attempts": 1,
+      "nextRetryAt": null,
+      "deliveredAt": "2024-01-15T10:00:01Z",
+      "createdAt": "2024-01-15T10:00:00Z"
+    },
+    {
+      "id": "del_def456",
+      "webhookId": "wh_abc123",
+      "event": "subscription.updated",
+      "payload": {
+        "organizationId": "org_cld2abc123def456",
+        "plan": "pro"
+      },
+      "response": null,
+      "statusCode": 500,
+      "attempts": 2,
+      "nextRetryAt": "2024-01-15T11:00:00Z",
+      "deliveredAt": null,
+      "createdAt": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl "https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/webhooks/wh_abc123/deliveries?limit=20" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
