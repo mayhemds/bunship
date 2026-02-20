@@ -1,0 +1,46 @@
+---
+title: "Delete Webhook Endpoint"
+api: "DELETE /api/v1/organizations/{orgId}/webhooks/{id}"
+description: "Delete a webhook endpoint"
+---
+
+Permanently deletes a webhook endpoint. All pending deliveries for this endpoint are cancelled.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Webhook endpoint identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Always `true` on success.
+</ResponseField>
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "message": "Webhook endpoint deleted"
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X DELETE https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/webhooks/wh_abc123 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

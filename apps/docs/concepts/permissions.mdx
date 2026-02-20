@@ -1,0 +1,403 @@
+---
+title: Permissions
+description: "Role-based access control (RBAC)"
+---
+
+## Overview
+
+BunShip enforces access control through a role-based permission system. Every organization member has a **role**, and each role maps to a set of **permissions**. Middleware checks these permissions before a route handler executes, so unauthorized requests never reach your business logic.
+
+## Role Hierarchy
+
+Four built-in roles are ordered from most to least privileged:
+
+| Role       | Level    | Description                                                                                                                                  |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owner**  | Highest  | Full control over the organization. Wildcard (`*`) permission grants access to everything. One owner per organization.                       |
+| **Admin**  | High     | Manages team members, projects, webhooks, API keys, and audit logs. Cannot delete the organization or manage billing subscriptions directly. |
+| **Member** | Standard | Works within the organization: reads org details, views the member list, and has full CRUD on projects.                                      |
+| **Viewer** | Lowest   | Read-only access to organization details, the member list, and projects. Cannot create, update, or delete anything.                          |
+
+## Permission Definitions
+
+Every permission follows the pattern `resource:action`. A wildcard suffix (`resource:*`) grants all actions for that resource. The global wildcard (`*`) grants every permission.
+
+```typescript
+// packages/config/src/permissions.ts
+export const permissions = {
+  "org:read": "View organization details",
+  "org:update": "Update organization settings",
+  "org:delete": "Delete organization",
+  "org:transfer": "Transfer organization ownership",
+
+  "members:read": "View team members",
+  "members:invite": "Invite new members",
+  "members:update": "Update member roles",
+  "members:remove": "Remove members",
+  "members:*": "Full member management",
+
+  "invitations:read": "View pending invitations",
+  "invitations:create": "Send invitations",
+  "invitations:delete": "Cancel invitations",
+  "invitations:*": "Full invitation management",
+
+  "projects:read": "View projects",
+  "projects:create": "Create projects",
+  "projects:update": "Update projects",
+  "projects:delete": "Delete projects",
+  "projects:*": "Full project management",
+
+  "webhooks:read": "View webhook endpoints",
+  "webhooks:create": "Create webhook endpoints",
+  "webhooks:update": "Update webhook endpoints",
+  "webhooks:delete": "Delete webhook endpoints",
+  "webhooks:*": "Full webhook management",
+
+  "api-keys:read": "View API keys",
+  "api-keys:create": "Create API keys",
+  "api-keys:delete": "Delete API keys",
+  "api-keys:*": "Full API key management",
+
+  "billing:read": "View billing information",
+  "billing:manage": "Manage subscription",
+  "billing:*": "Full billing management",
+
+  "audit-logs:read": "View audit logs",
+
+  "admin:*": "Full admin access",
+} as const;
+```
+
+## Role-Permission Matrix
+
+The mapping from roles to permissions is defined in `featuresConfig.organizations.permissions`:
+
+```typescript
+// packages/config/src/features.ts
+permissions: {
+  owner: ["*"],
+  admin: [
+    "org:read",
+    "org:update",
+    "members:*",
+    "invitations:*",
+    "projects:*",
+    "webhooks:*",
+    "api-keys:*",
+    "audit-logs:read",
+  ],
+  member: [
+    "org:read",
+    "members:read",
+    "projects:*",
+  ],
+  viewer: [
+    "org:read",
+    "members:read",
+    "projects:read",
+  ],
+}
+```
+
+The full matrix, expanded:
+
+| Permission           | Owner | Admin | Member | Viewer |
+| -------------------- | :---: | :---: | :----: | :----: |
+| `org:read`           |  Yes  |  Yes  |  Yes   |  Yes   |
+| `org:update`         |  Yes  |  Yes  |   -    |   -    |
+| `org:delete`         |  Yes  |   -   |   -    |   -    |
+| `org:transfer`       |  Yes  |   -   |   -    |   -    |
+| `members:read`       |  Yes  |  Yes  |  Yes   |  Yes   |
+| `members:invite`     |  Yes  |  Yes  |   -    |   -    |
+| `members:update`     |  Yes  |  Yes  |   -    |   -    |
+| `members:remove`     |  Yes  |  Yes  |   -    |   -    |
+| `invitations:read`   |  Yes  |  Yes  |   -    |   -    |
+| `invitations:create` |  Yes  |  Yes  |   -    |   -    |
+| `invitations:delete` |  Yes  |  Yes  |   -    |   -    |
+| `projects:read`      |  Yes  |  Yes  |  Yes   |  Yes   |
+| `projects:create`    |  Yes  |  Yes  |  Yes   |   -    |
+| `projects:update`    |  Yes  |  Yes  |  Yes   |   -    |
+| `projects:delete`    |  Yes  |  Yes  |  Yes   |   -    |
+| `webhooks:read`      |  Yes  |  Yes  |   -    |   -    |
+| `webhooks:create`    |  Yes  |  Yes  |   -    |   -    |
+| `webhooks:update`    |  Yes  |  Yes  |   -    |   -    |
+| `webhooks:delete`    |  Yes  |  Yes  |   -    |   -    |
+| `api-keys:read`      |  Yes  |  Yes  |   -    |   -    |
+| `api-keys:create`    |  Yes  |  Yes  |   -    |   -    |
+| `api-keys:delete`    |  Yes  |  Yes  |   -    |   -    |
+| `billing:read`       |  Yes  |   -   |   -    |   -    |
+| `billing:manage`     |  Yes  |   -   |   -    |   -    |
+| `audit-logs:read`    |  Yes  |  Yes  |   -    |   -    |
+
+## How Permissions Are Checked
+
+BunShip provides two middleware functions for access control: `requirePermission()` for permission-based checks and `requireRole()` for role-based checks.
+
+### Permission Check
+
+`requirePermission()` reads the user's role from their membership, looks up the role's permission list, and runs it through the `hasPermission()` function:
+
+```typescript
+// apps/api/src/middleware/roles.ts
+export function requirePermission(permission: Permission) {
+  return new Elysia({ name: `permission:${permission}` }).derive(
+    { as: "scoped" },
+    ({ store, set }) => {
+      const membership = (store as { membership?: Membership }).membership;
+
+      if (!membership) {
+        set.status = 401;
+        throw new Error("Authentication required");
+      }
+
+      const rolePermissions =
+        featuresConfig.organizations.permissions[
+          membership.role as keyof typeof featuresConfig.organizations.permissions
+        ] || [];
+
+      if (!hasPermission(rolePermissions, permission)) {
+        set.status = 403;
+        throw new AuthorizationError(`Missing permission: ${permission}`);
+      }
+
+      return {};
+    }
+  );
+}
+```
+
+### Permission Resolution Logic
+
+The `hasPermission()` function checks three levels of matching:
+
+```typescript
+// packages/config/src/permissions.ts
+export function hasPermission(
+  userPermissions: readonly string[],
+  requiredPermission: Permission
+): boolean {
+  // 1. Global wildcard -- grants everything
+  if (userPermissions.includes("*")) return true;
+
+  // 2. Direct match -- permission string matches exactly
+  if (userPermissions.includes(requiredPermission)) return true;
+
+  // 3. Category wildcard -- "members:*" grants "members:read"
+  const [category] = requiredPermission.split(":");
+  if (category && userPermissions.includes(`${category}:*`)) return true;
+
+  return false;
+}
+```
+
+This means the owner role (with `["*"]`) passes every check, and admin's `"members:*"` grants `"members:read"`, `"members:invite"`, `"members:update"`, and `"members:remove"` in a single entry.
+
+### Role Check
+
+For cases where you need to restrict by role name rather than permission, use `requireRole()`:
+
+```typescript
+// Only owners and admins can access this route
+app
+  .use(authMiddleware)
+  .use(organizationMiddleware)
+  .use(requireRole("owner", "admin"))
+  .delete("/danger-zone", handler);
+```
+
+BunShip exports two convenience shortcuts:
+
+```typescript
+// Requires the "owner" role
+export const requireOwner = requireRole("owner");
+
+// Requires "owner" or "admin" role
+export const requireAdmin = requireRole("owner", "admin");
+```
+
+### Using Permission Middleware in Routes
+
+A typical organization-scoped route chains the middleware in order:
+
+```typescript
+import { Elysia } from "elysia";
+import { authMiddleware } from "../middleware/auth";
+import { organizationMiddleware } from "../middleware/organization";
+import { requirePermission } from "../middleware/roles";
+
+const projectRoutes = new Elysia({ prefix: "/organizations/:orgId/projects" })
+  .use(authMiddleware)
+  .use(organizationMiddleware)
+
+  // List projects -- any member can read
+  .use(requirePermission("projects:read"))
+  .get("/", listProjectsHandler)
+
+  // Create project -- members and above
+  .use(requirePermission("projects:create"))
+  .post("/", createProjectHandler)
+
+  // Delete project -- members and above
+  .use(requirePermission("projects:delete"))
+  .delete("/:projectId", deleteProjectHandler);
+```
+
+## Adding Custom Roles
+
+To add a new role (for example, `billing-admin` with access to billing and org settings):
+
+<Steps>
+  <Step title="Add the role to the features config">
+    ```typescript
+    // packages/config/src/features.ts
+    organizations: {
+      roles: ["owner", "admin", "billing-admin", "member", "viewer"] as const,
+      permissions: {
+        owner: ["*"],
+        admin: [/* existing */],
+        "billing-admin": [
+          "org:read",
+          "billing:*",
+          "audit-logs:read",
+        ],
+        member: [/* existing */],
+        viewer: [/* existing */],
+      },
+    }
+    ```
+  </Step>
+  <Step title="Update the database enum">
+    Add the new role to the membership and invitation schema enums:
+
+    ```typescript
+    // packages/database/src/schema/memberships.ts
+    role: text("role", {
+      enum: ["owner", "admin", "billing-admin", "member", "viewer"],
+    }).notNull(),
+    ```
+
+  </Step>
+  <Step title="Generate and run a migration">
+    ```bash
+    bun run db:generate
+    bun run db:migrate
+    ```
+  </Step>
+</Steps>
+
+No middleware changes are needed. The existing `requirePermission()` and `requireRole()` functions will pick up the new role automatically because they read from `featuresConfig` at runtime.
+
+## Adding Custom Permissions
+
+To protect a new resource type (for example, `reports`):
+
+<Steps>
+  <Step title="Define the permissions">
+    ```typescript
+    // packages/config/src/permissions.ts
+    export const permissions = {
+      // ... existing permissions
+      "reports:read": "View reports",
+      "reports:create": "Create reports",
+      "reports:delete": "Delete reports",
+      "reports:*": "Full report management",
+    } as const;
+    ```
+  </Step>
+  <Step title="Assign permissions to roles">
+    ```typescript
+    // packages/config/src/features.ts
+    permissions: {
+      owner: ["*"],  // already covers everything
+      admin: [
+        // ... existing
+        "reports:*",
+      ],
+      member: [
+        // ... existing
+        "reports:read",
+        "reports:create",
+      ],
+      viewer: [
+        // ... existing
+        "reports:read",
+      ],
+    }
+    ```
+  </Step>
+  <Step title="Use in routes">
+    ```typescript
+    app
+      .use(authMiddleware)
+      .use(organizationMiddleware)
+      .use(requirePermission("reports:create"))
+      .post("/reports", createReportHandler);
+    ```
+
+    TypeScript will autocomplete the new permission strings since `Permission` is derived from the `permissions` object keys.
+
+  </Step>
+</Steps>
+
+## API Key Scopes
+
+API keys use a separate scope system from RBAC permissions. Scopes follow a `action:resource` format (note the reversed order compared to RBAC permissions):
+
+```typescript
+// packages/config/src/features.ts
+apiKeys: {
+  scopes: [
+    "read:projects",
+    "write:projects",
+    "read:members",
+    "write:members",
+    "read:webhooks",
+    "write:webhooks",
+  ] as const,
+}
+```
+
+### How Scopes Relate to Permissions
+
+| API Key Scope    | Equivalent RBAC Permissions                             |
+| ---------------- | ------------------------------------------------------- |
+| `read:projects`  | `projects:read`                                         |
+| `write:projects` | `projects:create`, `projects:update`, `projects:delete` |
+| `read:members`   | `members:read`                                          |
+| `write:members`  | `members:invite`, `members:update`, `members:remove`    |
+| `read:webhooks`  | `webhooks:read`                                         |
+| `write:webhooks` | `webhooks:create`, `webhooks:update`, `webhooks:delete` |
+
+When an API key is used for authentication, the system checks both that the key is valid and that its scopes cover the requested operation. A key with `["read:projects"]` can list projects but cannot create or delete them.
+
+<Note>
+  API key scopes are deliberately more coarse-grained than RBAC permissions. A `write:projects`
+  scope grants create, update, and delete in one entry, while RBAC separates these into individual
+  permissions. This keeps key creation simple for integrators.
+</Note>
+
+## Utility Functions
+
+The `@bunship/config` package exports several helper functions for working with permissions programmatically:
+
+```typescript
+import {
+  hasPermission,
+  hasAllPermissions,
+  hasAnyPermission,
+  getCategoryPermissions,
+} from "@bunship/config";
+
+const userPerms = ["org:read", "projects:*"];
+
+hasPermission(userPerms, "projects:read"); // true (category wildcard)
+hasPermission(userPerms, "members:read"); // false
+
+hasAllPermissions(userPerms, ["org:read", "projects:create"]); // true
+hasAnyPermission(userPerms, ["billing:read", "projects:read"]); // true
+
+getCategoryPermissions("projects");
+// ["projects:read", "projects:create", "projects:update", "projects:delete", "projects:*"]
+```
+
+These functions are useful when building UI elements that show or hide features based on the current user's permissions, or when writing service-layer authorization checks outside of middleware.

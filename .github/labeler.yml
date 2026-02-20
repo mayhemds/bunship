@@ -1,0 +1,47 @@
+# Label PRs based on changed files
+
+"api":
+  - apps/api/**/*
+
+"database":
+  - packages/database/**/*
+
+"emails":
+  - packages/emails/**/*
+
+"config":
+  - packages/config/**/*
+  - "*.config.js"
+  - "*.config.ts"
+
+"utils":
+  - packages/utils/**/*
+
+"docs":
+  - apps/docs/**/*
+  - "**/*.md"
+
+"ci/cd":
+  - .github/**/*
+  - Dockerfile
+  - .dockerignore
+  - docker/**/*
+
+"dependencies":
+  - package.json
+  - bun.lockb
+  - "**/package.json"
+
+"tests":
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/__tests__/**/*"
+
+"typescript":
+  - "**/*.ts"
+  - "**/*.tsx"
+  - tsconfig*.json
+
+"security":
+  - "**/auth/**/*"
+  - "**/security/**/*"

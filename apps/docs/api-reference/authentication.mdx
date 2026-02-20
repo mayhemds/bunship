@@ -1,0 +1,126 @@
+---
+title: "Authentication"
+description: "How to authenticate with the BunShip API"
+---
+
+BunShip provides two authentication mechanisms. Choose the right one based on your use case.
+
+## JWT Bearer Tokens
+
+Best for: **user-facing applications** (web apps, mobile apps, SPAs).
+
+### Getting Tokens
+
+Call the [login endpoint](/api-reference/auth/login) with valid credentials:
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecureP@ssw0rd"
+  }'
+```
+
+The response includes an access token and a refresh token:
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "expiresIn": 900
+}
+```
+
+### Using Bearer Tokens
+
+Include the access token in the `Authorization` header on every authenticated request:
+
+```bash
+curl https://api.bunship.com/api/v1/users/me \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
+### Token Lifetimes
+
+| Token         | Lifetime   |
+| ------------- | ---------- |
+| Access token  | 15 minutes |
+| Refresh token | 7 days     |
+
+### Refreshing Tokens
+
+Before the access token expires, call the [refresh endpoint](/api-reference/auth/refresh) with the refresh token:
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refreshToken": "eyJhbGciOiJIUzI1NiIs..."}'
+```
+
+This returns a new token pair and invalidates the previous refresh token (rotation). Store the new refresh token for the next rotation.
+
+### Two-Factor Authentication
+
+If the user has 2FA enabled, the login request must include a `twoFactorCode`:
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecureP@ssw0rd",
+    "twoFactorCode": "123456"
+  }'
+```
+
+Without the code, the login will fail with a `401` response indicating that 2FA verification is required.
+
+## API Key Authentication
+
+Best for: **server-to-server integrations**, CI/CD pipelines, and background jobs.
+
+### Creating an API Key
+
+API keys are created through the [Create API Key](/api-reference/api-keys/manage) endpoint or the dashboard. The full key is only shown once at creation time -- store it securely.
+
+### Using API Keys
+
+Include the key in the `X-API-Key` header:
+
+```bash
+curl https://api.bunship.com/api/v1/organizations/org_abc123/members \
+  -H "X-API-Key: bsk_live_abc123..."
+```
+
+### Key Properties
+
+| Property         | Description                                  |
+| ---------------- | -------------------------------------------- |
+| **Scopes**       | Restrict which endpoints the key can access  |
+| **Rate limit**   | Per-key request rate limit (requests/minute) |
+| **Expiration**   | Optional expiration date                     |
+| **Organization** | Keys are scoped to a single organization     |
+
+### Key Prefixes
+
+API keys use the prefix `bsk_live_` in production and `bsk_test_` in test environments. Only the prefix is stored; the full key cannot be retrieved after creation.
+
+## Which Method to Use
+
+| Scenario                              | Method           |
+| ------------------------------------- | ---------------- |
+| Web or mobile app on behalf of a user | JWT Bearer Token |
+| Backend service calling the API       | API Key          |
+| CI/CD pipeline                        | API Key          |
+| Webhook receiver verification         | API Key          |
+| One-off scripts                       | API Key          |
+| Interactive API exploration           | JWT Bearer Token |
+
+## Security Recommendations
+
+1. **Never expose tokens in URLs** -- always use headers.
+2. **Store refresh tokens securely** -- use HTTP-only cookies or encrypted storage.
+3. **Rotate API keys periodically** -- revoke old keys and create new ones.
+4. **Use scoped API keys** -- grant only the permissions the integration needs.
+5. **Enable 2FA** -- adds a second layer of protection to user accounts.

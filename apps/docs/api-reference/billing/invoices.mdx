@@ -1,0 +1,72 @@
+---
+title: "List Invoices"
+api: "GET /api/v1/organizations/{orgId}/billing/invoices"
+description: "Get the organization's invoice history"
+---
+
+Returns a list of invoices for the organization from Stripe, including payment status and download links.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="limit" type="number" default={10}>
+  Number of invoices to return. Between 1 and 100.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="data" type="array">
+  Array of invoice objects.
+
+  <Expandable title="invoice properties">
+    <ResponseField name="id" type="string">Stripe invoice ID.</ResponseField>
+    <ResponseField name="number" type="string | null">Invoice number.</ResponseField>
+    <ResponseField name="status" type="string | null">`"draft"`, `"open"`, `"paid"`, `"void"`, or `"uncollectible"`.</ResponseField>
+    <ResponseField name="amount" type="number">Invoice amount in smallest currency unit (e.g., cents).</ResponseField>
+    <ResponseField name="currency" type="string">Three-letter ISO currency code (e.g., `"usd"`).</ResponseField>
+    <ResponseField name="created" type="string">ISO 8601 creation timestamp.</ResponseField>
+    <ResponseField name="dueDate" type="string | null">ISO 8601 due date.</ResponseField>
+    <ResponseField name="paidAt" type="string | null">ISO 8601 payment timestamp.</ResponseField>
+    <ResponseField name="hostedInvoiceUrl" type="string | null">URL to view the invoice on Stripe.</ResponseField>
+    <ResponseField name="invoicePdf" type="string | null">URL to download the invoice PDF.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": [
+    {
+      "id": "in_1abc123",
+      "number": "INV-0001",
+      "status": "paid",
+      "amount": 2900,
+      "currency": "usd",
+      "created": "2024-01-15T10:00:00Z",
+      "dueDate": "2024-02-14T10:00:00Z",
+      "paidAt": "2024-01-15T10:05:00Z",
+      "hostedInvoiceUrl": "https://invoice.stripe.com/i/acct_abc/inv_123",
+      "invoicePdf": "https://pay.stripe.com/invoice/acct_abc/inv_123/pdf"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl "https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/billing/invoices?limit=20" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

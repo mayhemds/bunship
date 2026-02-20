@@ -1,0 +1,106 @@
+version: "3.9"
+
+services:
+  # ============================================
+  # Redis - Queue and Cache
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: bunship-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - bunship-network
+
+  # ============================================
+  # API Service
+  # ============================================
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: runner
+    container_name: bunship-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379
+      - API_URL=http://localhost:3000
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      # Mount source for hot reload in development
+      - ../apps/api/src:/app/apps/api/src:ro
+      - ../packages:/app/packages:ro
+      # SQLite database persistence (if using local SQLite)
+      - db-data:/app/data
+    healthcheck:
+      test: ["CMD", "bun", "fetch", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - bunship-network
+
+  # ============================================
+  # Worker Service - Background Jobs
+  # ============================================
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: runner
+    container_name: bunship-worker
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=development
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["bun", "run", "apps/api/src/worker.ts"]
+    volumes:
+      # Mount source for hot reload in development
+      - ../apps/api/src:/app/apps/api/src:ro
+      - ../packages:/app/packages:ro
+    networks:
+      - bunship-network
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  bunship-network:
+    driver: bridge
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  redis-data:
+    driver: local
+  db-data:
+    driver: local

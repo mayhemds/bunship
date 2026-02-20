@@ -1,0 +1,61 @@
+---
+title: "Refresh Token"
+api: "POST /api/v1/auth/refresh"
+description: "Exchange a refresh token for a new token pair"
+---
+
+Uses a valid refresh token to obtain a new access token and refresh token pair. The previous refresh token is invalidated (token rotation) to prevent replay attacks.
+
+## Auth
+
+None required. The refresh token in the request body serves as authentication.
+
+## Rate Limit
+
+20 requests per minute per IP.
+
+## Request Body
+
+<ParamField body="refreshToken" type="string" required>
+  The refresh token received from a previous login or refresh response.
+</ParamField>
+
+## Response
+
+<ResponseField name="accessToken" type="string">
+  New JWT access token. Expires in 15 minutes.
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string">
+  New JWT refresh token. Expires in 7 days. Store this for the next rotation.
+</ResponseField>
+
+<ResponseField name="expiresIn" type="number">
+  Access token expiry in seconds (900).
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": 900
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                        |
+| ------ | ---------------------- | -------------------------------------------------- |
+| `401`  | `AUTHENTICATION_ERROR` | Refresh token is invalid, expired, or already used |
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  }'
+```

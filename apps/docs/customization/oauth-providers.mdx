@@ -1,0 +1,489 @@
+---
+title: OAuth Providers
+description: "Add social login providers"
+---
+
+BunShip ships with Google and GitHub OAuth built in. This guide explains the auth system architecture and walks through adding a new OAuth provider from scratch.
+
+## Current Auth System
+
+BunShip supports five authentication methods, all controlled by feature flags in `packages/config/src/features.ts`:
+
+| Method           | Config Flag           | Status   |
+| ---------------- | --------------------- | -------- |
+| Email + password | `enableEmailPassword` | Built-in |
+| Magic link       | `enableMagicLink`     | Built-in |
+| Google OAuth     | `enableGoogleOAuth`   | Built-in |
+| GitHub OAuth     | `enableGithubOAuth`   | Built-in |
+| TOTP two-factor  | `enableTwoFactor`     | Built-in |
+
+The auth flow produces the same result regardless of method: a `user` record in the database and a JWT session (access token + refresh token).
+
+### How OAuth Works in BunShip
+
+<Steps>
+  <Step title="User clicks 'Sign in with Provider'">
+    The frontend redirects to `GET /api/v1/auth/{provider}`.
+  </Step>
+  <Step title="API generates an authorization URL">
+    BunShip creates a state parameter, stores it in a short-lived cookie, and redirects the user to
+    the provider's consent screen.
+  </Step>
+  <Step title="Provider redirects back">
+    After the user approves, the provider redirects to `GET /api/v1/auth/{provider}/callback` with
+    an authorization code.
+  </Step>
+  <Step title="API exchanges the code for tokens">
+    BunShip calls the provider's token endpoint, then fetches the user's profile (email, name,
+    avatar).
+  </Step>
+  <Step title="User is created or matched">
+    If the email matches an existing user, the accounts are linked. Otherwise, a new user is
+    created. A JWT session is issued either way.
+  </Step>
+  <Step title="Frontend receives tokens">
+    The callback redirects to the frontend with tokens in the URL fragment or via a secure cookie
+    handoff.
+  </Step>
+</Steps>
+
+## Adding a New OAuth Provider
+
+This walkthrough adds **Twitter (X) OAuth 2.0** as an example. The same pattern works for any OAuth 2.0 provider (Discord, Slack, LinkedIn, etc.).
+
+### Step 1: Install the OAuth Library
+
+BunShip uses [Arctic](https://arcticjs.dev) for OAuth. It provides type-safe, zero-dependency clients for 50+ providers.
+
+```bash
+bun add arctic
+```
+
+Arctic already includes Twitter support. For providers not in Arctic, you can implement the OAuth flow manually or use a generic OAuth 2.0 client.
+
+### Step 2: Add Environment Variables
+
+Add the provider's credentials to `.env`:
+
+```bash
+TWITTER_CLIENT_ID=your_twitter_client_id
+TWITTER_CLIENT_SECRET=your_twitter_client_secret
+```
+
+To get these credentials:
+
+1. Go to the [Twitter Developer Portal](https://developer.twitter.com/en/portal)
+2. Create a new project and app
+3. Enable OAuth 2.0 under "User authentication settings"
+4. Set the callback URL to `http://localhost:3000/api/v1/auth/twitter/callback`
+5. Copy the Client ID and Client Secret
+
+### Step 3: Add the Feature Flag
+
+Update `packages/config/src/features.ts`:
+
+```typescript
+auth: {
+  enableEmailPassword: true,
+  enableMagicLink: true,
+  enableGoogleOAuth: true,
+  enableGithubOAuth: true,
+  enableTwitterOAuth: true,  // Add this
+  enableTwoFactor: true,
+  // ...
+},
+```
+
+### Step 4: Create the OAuth Routes
+
+Create a new route file for the provider:
+
+```typescript
+// apps/api/src/routes/auth/twitter.ts
+import { Elysia } from "elysia";
+import { Twitter } from "arctic";
+import { appConfig, featuresConfig } from "@bunship/config";
+import { getDatabase, eq } from "@bunship/database";
+import { users } from "@bunship/database/schema";
+import * as authService from "../../services/auth.service";
+
+const twitter = new Twitter(
+  process.env.TWITTER_CLIENT_ID!,
+  process.env.TWITTER_CLIENT_SECRET!,
+  `${appConfig.url}${appConfig.api.prefix}/auth/twitter/callback`
+);
+
+export const twitterAuthRoutes = new Elysia({ prefix: "/auth/twitter" })
+  /**
+   * GET /auth/twitter
+   * Redirect to Twitter authorization screen
+   */
+  .get(
+    "/",
+    async ({ cookie, set }) => {
+      if (!featuresConfig.auth.enableTwitterOAuth) {
+        set.status = 404;
+        return { error: "Twitter OAuth is not enabled" };
+      }
+
+      const state = crypto.randomUUID();
+      const codeVerifier = crypto.randomUUID();
+
+      // Store state and verifier in secure cookies
+      cookie.oauth_state.set({
+        value: state,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 600, // 10 minutes
+        sameSite: "lax",
+        path: "/",
+      });
+      cookie.code_verifier.set({
+        value: codeVerifier,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 600,
+        sameSite: "lax",
+        path: "/",
+      });
+
+      const url = twitter.createAuthorizationURL(state, codeVerifier, ["tweet.read", "users.read"]);
+
+      set.redirect = url.toString();
+    },
+    {
+      detail: {
+        tags: ["Auth"],
+        summary: "Twitter OAuth login",
+        description: "Redirects to Twitter for authorization",
+      },
+    }
+  )
+
+  /**
+   * GET /auth/twitter/callback
+   * Handle Twitter OAuth callback
+   */
+  .get(
+    "/callback",
+    async ({ query, cookie, set, request }) => {
+      const { code, state } = query;
+      const storedState = cookie.oauth_state.value;
+      const codeVerifier = cookie.code_verifier.value;
+
+      // Verify state to prevent CSRF
+      if (!state || !storedState || state !== storedState) {
+        set.status = 400;
+        return { error: "Invalid OAuth state" };
+      }
+
+      // Clear OAuth cookies
+      cookie.oauth_state.remove();
+      cookie.code_verifier.remove();
+
+      // Exchange code for tokens
+      const tokens = await twitter.validateAuthorizationCode(code, codeVerifier);
+
+      // Fetch user profile from Twitter API
+      const profileResponse = await fetch(
+        "https://api.twitter.com/2/users/me?user.fields=profile_image_url",
+        {
+          headers: {
+            Authorization: `Bearer ${tokens.accessToken()}`,
+          },
+        }
+      );
+      const { data: twitterUser } = await profileResponse.json();
+
+      // Find or create the user
+      const db = getDatabase();
+      let user = await db.query.users.findFirst({
+        where: eq(users.email, twitterUser.email),
+      });
+
+      if (!user) {
+        // Create new user
+        const [newUser] = await db
+          .insert(users)
+          .values({
+            email: twitterUser.email,
+            fullName: twitterUser.name,
+            avatarUrl: twitterUser.profile_image_url,
+            emailVerified: new Date(), // OAuth emails are pre-verified
+          })
+          .returning();
+        user = newUser;
+      }
+
+      // Create session and generate JWT tokens
+      const session = await authService.createSession(user.id, {
+        userAgent: request.headers.get("user-agent") || undefined,
+        ipAddress: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim(),
+      });
+
+      // Redirect to frontend with tokens
+      const redirectUrl = new URL("/auth/callback", appConfig.frontendUrl);
+      redirectUrl.searchParams.set("access_token", session.accessToken);
+      redirectUrl.searchParams.set("refresh_token", session.refreshToken);
+
+      set.redirect = redirectUrl.toString();
+    },
+    {
+      detail: {
+        tags: ["Auth"],
+        summary: "Twitter OAuth callback",
+        description: "Handles the OAuth callback from Twitter",
+      },
+    }
+  );
+```
+
+### Step 5: Register the Routes
+
+Add the new routes to the auth module in `apps/api/src/routes/auth/index.ts`:
+
+```typescript
+import { twitterAuthRoutes } from "./twitter";
+
+export const authRoutes = new Elysia({ prefix: "/auth" })
+  // ... existing routes
+  .use(twitterAuthRoutes);
+```
+
+Or register directly in the main app entry point if you prefer to keep auth providers separate.
+
+### Step 6: Update the Frontend
+
+Add a "Sign in with Twitter" button that navigates to the OAuth endpoint:
+
+```typescript
+function SignInWithTwitter() {
+  const handleClick = () => {
+    window.location.href = `${API_URL}/api/v1/auth/twitter`;
+  };
+
+  return (
+    <button onClick={handleClick}>
+      Sign in with Twitter
+    </button>
+  );
+}
+```
+
+## Provider Configuration Pattern
+
+To keep OAuth provider setup consistent, follow this pattern for each new provider:
+
+| Step | File                                     | What to add                                       |
+| ---- | ---------------------------------------- | ------------------------------------------------- |
+| 1    | `.env`                                   | `PROVIDER_CLIENT_ID` and `PROVIDER_CLIENT_SECRET` |
+| 2    | `packages/config/src/features.ts`        | `enableProviderOAuth: true` flag                  |
+| 3    | `apps/api/src/routes/auth/{provider}.ts` | OAuth redirect and callback routes                |
+| 4    | `apps/api/src/routes/auth/index.ts`      | Import and `.use()` the new routes                |
+
+## Database Changes for OAuth
+
+The default `users` table stores basic profile data (email, name, avatar) but does not track which OAuth provider a user signed up with. If you need to:
+
+- Track which providers a user has connected
+- Support linking multiple providers to one account
+- Store provider-specific tokens for API access
+
+Add an `oauth_accounts` table:
+
+```typescript
+// packages/database/src/schema/oauthAccounts.ts
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { createId } from "@paralleldrive/cuid2";
+import { users } from "./users";
+
+export const oauthAccounts = sqliteTable(
+  "oauth_accounts",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(), // "google", "github", "twitter"
+    providerAccountId: text("provider_account_id").notNull(),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => ({
+    userIdIdx: index("oauth_accounts_user_id_idx").on(table.userId),
+    providerIdx: index("oauth_accounts_provider_idx").on(table.provider, table.providerAccountId),
+  })
+);
+
+export type OAuthAccount = typeof oauthAccounts.$inferSelect;
+export type NewOAuthAccount = typeof oauthAccounts.$inferInsert;
+```
+
+Then update the callback handler to store the OAuth account:
+
+```typescript
+// In the callback handler, after finding/creating the user:
+await db.insert(oauthAccounts).values({
+  userId: user.id,
+  provider: "twitter",
+  providerAccountId: twitterUser.id,
+  accessToken: tokens.accessToken(),
+  refreshToken: tokens.refreshToken(),
+  expiresAt: tokens.accessTokenExpiresAt(),
+});
+```
+
+## Linking Accounts
+
+To let users connect multiple providers to one account, add a "Link Account" flow:
+
+```typescript
+// apps/api/src/routes/auth/link.ts
+import { Elysia } from "elysia";
+import { authMiddleware } from "../../middleware/auth";
+
+export const linkRoutes = new Elysia({ prefix: "/auth/link" })
+  .use(authMiddleware)
+
+  // Start linking: same redirect flow, but stores user ID in cookie
+  .get("/:provider", async ({ params, user, cookie, set }) => {
+    cookie.link_user_id.set({
+      value: user.id,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 600,
+      sameSite: "lax",
+      path: "/",
+    });
+
+    // Redirect to provider authorization
+    // Use the same OAuth client as the login flow
+    set.redirect = getAuthorizationUrl(params.provider);
+  })
+
+  // List connected accounts
+  .get("/accounts", async ({ user }) => {
+    const db = getDatabase();
+    const accounts = await db.query.oauthAccounts.findMany({
+      where: eq(oauthAccounts.userId, user.id),
+      columns: {
+        id: true,
+        provider: true,
+        createdAt: true,
+      },
+    });
+
+    return { accounts };
+  })
+
+  // Unlink a provider
+  .delete("/:accountId", async ({ params, user }) => {
+    const db = getDatabase();
+    await db
+      .delete(oauthAccounts)
+      .where(and(eq(oauthAccounts.id, params.accountId), eq(oauthAccounts.userId, user.id)));
+
+    return { message: "Account unlinked" };
+  });
+```
+
+<Warning>
+  Before unlinking, verify the user has at least one other login method (a password or another
+  linked provider). Otherwise they could lock themselves out of their account.
+</Warning>
+
+## Common Providers
+
+Here are the Arctic constructor patterns for popular OAuth providers:
+
+<AccordionGroup>
+  <Accordion title="Google">
+    ```typescript
+    import { Google } from "arctic";
+
+    const google = new Google(
+      process.env.GOOGLE_CLIENT_ID!,
+      process.env.GOOGLE_CLIENT_SECRET!,
+      `${appConfig.url}${appConfig.api.prefix}/auth/google/callback`
+    );
+
+    const url = google.createAuthorizationURL(state, codeVerifier, [
+      "openid",
+      "email",
+      "profile",
+    ]);
+    ```
+
+  </Accordion>
+
+  <Accordion title="GitHub">
+    ```typescript
+    import { GitHub } from "arctic";
+
+    const github = new GitHub(
+      process.env.GITHUB_CLIENT_ID!,
+      process.env.GITHUB_CLIENT_SECRET!,
+      `${appConfig.url}${appConfig.api.prefix}/auth/github/callback`
+    );
+
+    const url = github.createAuthorizationURL(state, [
+      "user:email",
+    ]);
+    ```
+
+  </Accordion>
+
+  <Accordion title="Discord">
+    ```typescript
+    import { Discord } from "arctic";
+
+    const discord = new Discord(
+      process.env.DISCORD_CLIENT_ID!,
+      process.env.DISCORD_CLIENT_SECRET!,
+      `${appConfig.url}${appConfig.api.prefix}/auth/discord/callback`
+    );
+
+    const url = discord.createAuthorizationURL(state, [
+      "identify",
+      "email",
+    ]);
+    ```
+
+  </Accordion>
+
+  <Accordion title="Slack">
+    ```typescript
+    import { Slack } from "arctic";
+
+    const slack = new Slack(
+      process.env.SLACK_CLIENT_ID!,
+      process.env.SLACK_CLIENT_SECRET!,
+      `${appConfig.url}${appConfig.api.prefix}/auth/slack/callback`
+    );
+
+    const url = slack.createAuthorizationURL(state, [
+      "openid",
+      "email",
+      "profile",
+    ]);
+    ```
+
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/customization/configuration">
+    Enable feature flags for your new providers
+  </Card>
+  <Card title="Database Schema" icon="database" href="/customization/database-schema">
+    Add the oauth_accounts table to your database
+  </Card>
+</CardGroup>

@@ -1,0 +1,79 @@
+---
+title: "List Invitations"
+api: "GET /api/v1/organizations/{orgId}/invitations"
+description: "List pending invitations for the organization"
+---
+
+Returns all pending invitations for the organization, including the inviter's details and current status. Requires the `invitations:read` permission.
+
+## Auth
+
+<Note>Requires a valid Bearer token with `invitations:read` permission.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="invitations" type="array">
+  Array of invitation objects.
+
+  <Expandable title="invitation properties">
+    <ResponseField name="id" type="string">Invitation identifier.</ResponseField>
+    <ResponseField name="organizationId" type="string">Organization identifier.</ResponseField>
+    <ResponseField name="email" type="string">Invited email address.</ResponseField>
+    <ResponseField name="role" type="string">Assigned role: `"owner"`, `"admin"`, `"member"`, or `"viewer"`.</ResponseField>
+    <ResponseField name="invitedBy" type="object">
+      Inviter profile with `id`, `email`, and `fullName`.
+    </ResponseField>
+    <ResponseField name="expiresAt" type="string">ISO 8601 expiration timestamp.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+    <ResponseField name="status" type="string">`"pending"`, `"accepted"`, or `"expired"`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="number">
+  Total number of invitations.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "invitations": [
+    {
+      "id": "inv_abc123",
+      "organizationId": "org_cld2abc123def456",
+      "email": "newmember@example.com",
+      "role": "member",
+      "invitedBy": {
+        "id": "usr_cld2abc123def456",
+        "email": "owner@example.com",
+        "fullName": "John Doe"
+      },
+      "expiresAt": "2024-01-22T10:00:00Z",
+      "createdAt": "2024-01-15T10:00:00Z",
+      "status": "pending"
+    }
+  ],
+  "total": 1
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                            |
+| ------ | ---------------------- | ------------------------------------------------------ |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                        |
+| `403`  | `AUTHORIZATION_ERROR`  | Insufficient permissions (`invitations:read` required) |
+| `404`  | `NOT_FOUND`            | Organization not found                                 |
+
+## Example
+
+```bash
+curl https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/invitations \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

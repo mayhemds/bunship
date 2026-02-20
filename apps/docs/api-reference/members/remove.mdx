@@ -1,0 +1,51 @@
+---
+title: "Remove Member"
+api: "DELETE /api/v1/organizations/{orgId}/members/{memberId}"
+description: "Remove a member from the organization"
+---
+
+Removes a member from the organization. You cannot remove the organization owner (transfer ownership first) or yourself (use "leave organization" instead). Requires the `members:remove` permission.
+
+## Auth
+
+<Note>Requires a valid Bearer token with `members:remove` permission.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+<ParamField path="memberId" type="string" required>
+  Membership identifier of the member to remove.
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Member removed successfully"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                          |
+| ------ | ---------------------- | ---------------------------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Cannot remove the owner or yourself                  |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                      |
+| `403`  | `AUTHORIZATION_ERROR`  | Insufficient permissions (`members:remove` required) |
+| `404`  | `NOT_FOUND`            | Member not found in this organization                |
+
+## Example
+
+```bash
+curl -X DELETE https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/members/mbr_def456 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

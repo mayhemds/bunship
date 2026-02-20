@@ -1,0 +1,298 @@
+---
+title: "Billing & Subscriptions"
+description: "Stripe-powered subscription management"
+---
+
+BunShip integrates Stripe to handle subscriptions, checkout, usage tracking, and customer self-service. Every organization starts on the Free plan and can upgrade through Stripe Checkout.
+
+## Plans and Pricing
+
+Three plans are defined in `packages/config/src/billing.ts`:
+
+| Feature            | Free   | Pro ($29/mo) | Enterprise ($99/mo) |
+| ------------------ | ------ | ------------ | ------------------- |
+| Team members       | 2      | 10           | Unlimited           |
+| Projects           | 3      | 25           | Unlimited           |
+| API requests/month | 1,000  | 100,000      | Unlimited           |
+| Webhook endpoints  | 1      | 10           | Unlimited           |
+| API keys           | 1      | 10           | 50                  |
+| Storage            | 0.5 GB | 10 GB        | 100 GB              |
+
+All paid plans offer monthly and yearly billing. Yearly billing saves roughly 17%.
+
+### Configuring Plans
+
+Plan configuration lives in a single file. Each plan defines its Stripe price IDs, usage limits, and feature list:
+
+```typescript
+// packages/config/src/billing.ts
+export const billingConfig = {
+  currency: "usd",
+  plans: [
+    {
+      id: "free",
+      name: "Free",
+      description: "For side projects and experimentation",
+      price: { monthly: 0, yearly: 0 },
+      stripePriceIds: { monthly: null, yearly: null },
+      limits: {
+        members: 2,
+        projects: 3,
+        apiRequests: 1000,
+        webhookEndpoints: 1,
+        apiKeys: 1,
+        storageGB: 0.5,
+      },
+      features: [
+        "Up to 2 team members",
+        "3 projects",
+        "1,000 API requests/month",
+        "Community support",
+      ],
+    },
+    {
+      id: "pro",
+      name: "Pro",
+      description: "For growing teams and businesses",
+      price: { monthly: 29, yearly: 290 },
+      stripePriceIds: {
+        monthly: process.env.STRIPE_PRO_MONTHLY_PRICE_ID ?? "price_pro_monthly",
+        yearly: process.env.STRIPE_PRO_YEARLY_PRICE_ID ?? "price_pro_yearly",
+      },
+      limits: {
+        members: 10,
+        projects: 25,
+        apiRequests: 100000,
+        webhookEndpoints: 10,
+        apiKeys: 10,
+        storageGB: 10,
+      },
+      features: [
+        "Up to 10 team members",
+        "25 projects",
+        "100K API requests/month",
+        "Webhooks",
+        "API access",
+        "Priority support",
+        "Audit logs (30 days)",
+      ],
+      popular: true,
+    },
+    // Enterprise plan follows the same pattern
+  ],
+} as const;
+```
+
+Set the `STRIPE_PRO_MONTHLY_PRICE_ID`, `STRIPE_PRO_YEARLY_PRICE_ID`, `STRIPE_ENTERPRISE_MONTHLY_PRICE_ID`, and `STRIPE_ENTERPRISE_YEARLY_PRICE_ID` environment variables to match the price IDs in your Stripe dashboard.
+
+## Checkout Flow
+
+When a user upgrades, BunShip creates a Stripe Checkout Session linked to the organization:
+
+```typescript
+// apps/api/src/services/billing.service.ts
+const session = await stripe.checkout.sessions.create({
+  customer: customerId,
+  mode: "subscription",
+  payment_method_types: ["card"],
+  line_items: [
+    {
+      price: priceId,
+      quantity: 1,
+    },
+  ],
+  success_url: `${appConfig.url}/dashboard/billing?success=true`,
+  cancel_url: `${appConfig.url}/dashboard/billing?canceled=true`,
+  metadata: {
+    organizationId: orgId,
+    planId: plan.id,
+  },
+  subscription_data: {
+    metadata: {
+      organizationId: orgId,
+      planId: plan.id,
+    },
+  },
+});
+```
+
+<Steps>
+  <Step title="User selects a plan">
+    Your frontend calls `POST /api/v1/billing/checkout` with the desired `priceId`.
+  </Step>
+  <Step title="BunShip creates a Stripe customer">
+    If the organization does not yet have a Stripe customer, one is created automatically and stored
+    in the `subscriptions` table.
+  </Step>
+  <Step title="Redirect to Stripe Checkout">
+    The API returns a Checkout Session URL. Redirect the user to complete payment.
+  </Step>
+  <Step title="Stripe webhook confirms subscription">
+    After payment, Stripe sends a `checkout.session.completed` webhook. BunShip updates the local
+    subscription record with the plan ID, status, and billing period.
+  </Step>
+</Steps>
+
+## Customer Portal
+
+Stripe's Customer Portal lets users manage their payment methods, view invoices, and cancel subscriptions without any custom UI:
+
+```typescript
+const session = await stripe.billingPortal.sessions.create({
+  customer: customerId,
+  return_url: `${appConfig.url}/dashboard/billing`,
+});
+```
+
+Call `POST /api/v1/billing/portal` to generate a portal session URL, then redirect the user.
+
+## Usage Tracking and Limits
+
+BunShip tracks resource usage per organization and compares it against the current plan's limits. The `getUsage` function queries counts in parallel:
+
+```typescript
+const [
+  [{ apiRequestCount }],
+  [{ memberCount }],
+  [{ projectCount }],
+  [{ webhookCount }],
+  [{ apiKeyCount }],
+] = await Promise.all([
+  db
+    .select({ apiRequestCount: sql<number>`count(*)` })
+    .from(auditLogs)
+    .where(eq(auditLogs.organizationId, orgId)),
+  db
+    .select({ memberCount: sql<number>`count(*)` })
+    .from(memberships)
+    .where(eq(memberships.organizationId, orgId)),
+  db
+    .select({ projectCount: sql<number>`count(*)` })
+    .from(projects)
+    .where(eq(projects.organizationId, orgId)),
+  db
+    .select({ webhookCount: sql<number>`count(*)` })
+    .from(webhooks)
+    .where(eq(webhooks.organizationId, orgId)),
+  db
+    .select({ apiKeyCount: sql<number>`count(*)` })
+    .from(apiKeys)
+    .where(and(eq(apiKeys.organizationId, orgId), eq(apiKeys.isActive, true))),
+]);
+```
+
+The response includes current usage, plan limits, and a percentage for each resource:
+
+```json
+{
+  "plan": {
+    "id": "pro",
+    "name": "Pro",
+    "limits": {
+      "members": 10,
+      "projects": 25,
+      "apiRequests": 100000,
+      "webhookEndpoints": 10,
+      "apiKeys": 10,
+      "storageGB": 10
+    }
+  },
+  "usage": {
+    "members": { "current": 4, "limit": 10, "percentage": 40 },
+    "projects": { "current": 8, "limit": 25, "percentage": 32 },
+    "apiRequests": { "current": 12450, "limit": 100000, "percentage": 12.45 }
+  }
+}
+```
+
+A limit of `-1` means unlimited (Enterprise plan). Use the helper functions from `@bunship/config`:
+
+```typescript
+import { isUnlimited, isWithinLimit } from "@bunship/config";
+
+if (!isWithinLimit(currentMembers, plan.limits.members)) {
+  throw new ValidationError("Member limit reached. Upgrade your plan.");
+}
+```
+
+## Webhook Handling
+
+BunShip automatically processes Stripe webhook events to keep subscription state in sync. The following events are handled:
+
+| Event                           | Action                                                                             |
+| ------------------------------- | ---------------------------------------------------------------------------------- |
+| `checkout.session.completed`    | Creates or updates the subscription record with plan ID and Stripe subscription ID |
+| `customer.subscription.updated` | Updates status, billing period, and cancellation state                             |
+| `customer.subscription.deleted` | Marks subscription as canceled, resets to Free plan                                |
+| `invoice.payment_succeeded`     | Updates payment status                                                             |
+| `invoice.payment_failed`        | Flags subscription for follow-up                                                   |
+
+<Warning>
+  Set `STRIPE_WEBHOOK_SECRET` in your environment to verify webhook signatures. Without it, BunShip
+  cannot validate that events come from Stripe.
+</Warning>
+
+## Cancellation
+
+Subscriptions cancel at the end of the current billing period rather than immediately. This gives users access to paid features until their prepaid time expires:
+
+```typescript
+const updatedSubscription = await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+  cancel_at_period_end: true,
+});
+
+await db
+  .update(subscriptions)
+  .set({
+    cancelAtPeriodEnd: true,
+    updatedAt: new Date(),
+  })
+  .where(eq(subscriptions.id, subscription.id));
+```
+
+## Invoices
+
+Retrieve an organization's invoice history from Stripe:
+
+```typescript
+const invoices = await stripe.invoices.list({
+  customer: customerId,
+  limit: 10,
+});
+```
+
+Each invoice includes the amount, status, PDF download link, and hosted payment page URL.
+
+## Testing with Stripe Test Mode
+
+<Info>During development, BunShip uses Stripe's test mode. No real charges are made.</Info>
+
+<Steps>
+  <Step title="Set test keys">
+    Use your Stripe **test** secret key and webhook secret in `.env`: ```bash
+    STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... ```
+  </Step>
+  <Step title="Use test card numbers">
+    Stripe provides test card numbers for different scenarios: - `4242 4242 4242 4242` -- Successful
+    payment - `4000 0000 0000 3220` -- 3D Secure required - `4000 0000 0000 0002` -- Declined
+  </Step>
+  <Step title="Forward webhooks locally">
+    Use the Stripe CLI to forward webhook events to your local server: ```bash stripe listen
+    --forward-to localhost:3000/api/v1/webhooks/stripe ```
+  </Step>
+  <Step title="Trigger test events">
+    ```bash stripe trigger checkout.session.completed stripe trigger customer.subscription.updated
+    ```
+  </Step>
+</Steps>
+
+## Environment Variables
+
+| Variable                             | Description                            | Required             |
+| ------------------------------------ | -------------------------------------- | -------------------- |
+| `STRIPE_SECRET_KEY`                  | Stripe API secret key                  | Yes                  |
+| `STRIPE_WEBHOOK_SECRET`              | Stripe webhook signing secret          | Yes                  |
+| `STRIPE_PRO_MONTHLY_PRICE_ID`        | Stripe price ID for Pro monthly        | Yes (for paid plans) |
+| `STRIPE_PRO_YEARLY_PRICE_ID`         | Stripe price ID for Pro yearly         | Yes (for paid plans) |
+| `STRIPE_ENTERPRISE_MONTHLY_PRICE_ID` | Stripe price ID for Enterprise monthly | Yes (for paid plans) |
+| `STRIPE_ENTERPRISE_YEARLY_PRICE_ID`  | Stripe price ID for Enterprise yearly  | Yes (for paid plans) |

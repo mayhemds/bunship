@@ -1,0 +1,38 @@
+{
+  "name": "@bunship/database",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    },
+    "./schema": {
+      "import": "./src/schema/index.ts",
+      "types": "./src/schema/index.ts"
+    }
+  },
+  "scripts": {
+    "generate": "bun --env-file=../../.env x drizzle-kit generate",
+    "migrate": "bun --env-file=../../.env x drizzle-kit migrate",
+    "push": "bun --env-file=../../.env x drizzle-kit push",
+    "studio": "bun --env-file=../../.env x drizzle-kit studio",
+    "seed": "bun --env-file=../../.env run src/seed.ts",
+    "reset": "rm -f local.db ../../local.db && bun run push && bun run seed",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "@paralleldrive/cuid2": "^2.2.2",
+    "drizzle-orm": "^0.45.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.8",
+    "typescript": "^5.4.0"
+  }
+}

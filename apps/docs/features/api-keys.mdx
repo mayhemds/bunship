@@ -1,0 +1,226 @@
+---
+title: "API Keys"
+description: "Programmatic API access with scoped keys"
+---
+
+BunShip provides API key management for programmatic access. Keys are scoped to organizations, support granular permissions, and track usage automatically.
+
+## Key Format
+
+API keys follow the format `bunship_live_<32 hex characters>`:
+
+```
+bunship_live_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a7b8c9d0e1f2a3b4c5d6a7b8c9d0
+```
+
+The prefix `bunship_live_` (or `bunship_test_` for test mode) makes keys identifiable in logs and configuration files. Only the first 8 characters of the random portion are stored as the display prefix:
+
+```
+bunship_live_a1b2c3d4...
+```
+
+## Creating API Keys
+
+Create a key by providing a name, optional scopes, and optional expiration:
+
+```typescript
+const { apiKey, plainKey } = await createApiKey(orgId, userId, {
+  name: "Production API Key",
+  scopes: ["read:projects", "write:projects", "read:members"],
+  rateLimit: 1000, // requests per minute
+  expiresAt: new Date("2026-01-01"),
+});
+```
+
+**API call:**
+
+```bash
+curl -X POST https://api.example.com/api/v1/api-keys \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "CI/CD Pipeline",
+    "scopes": ["read:projects", "write:projects"],
+    "expiresAt": "2026-01-01T00:00:00Z"
+  }'
+```
+
+<Warning>
+  The full API key is returned **only once** in the creation response. BunShip stores a SHA-256 hash
+  of the key, not the key itself. There is no way to retrieve the full key after creation.
+</Warning>
+
+**Response:**
+
+```json
+{
+  "apiKey": {
+    "id": "key_abc123",
+    "name": "CI/CD Pipeline",
+    "keyPrefix": "bunship_live_a1b2c3d4",
+    "scopes": ["read:projects", "write:projects"],
+    "rateLimit": null,
+    "isActive": true,
+    "createdAt": "2025-03-15T10:00:00Z",
+    "expiresAt": "2026-01-01T00:00:00Z",
+    "lastUsedAt": null
+  },
+  "plainKey": "bunship_live_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a7b8c9d0e1f2a3b4c5d6a7b8c9d0"
+}
+```
+
+## Scopes and Permissions
+
+API keys use a scope-based permission model. Each scope follows the pattern `action:resource`:
+
+| Scope             | Description                           |
+| ----------------- | ------------------------------------- |
+| `read:projects`   | List and view projects                |
+| `write:projects`  | Create and update projects            |
+| `read:members`    | List organization members             |
+| `write:members`   | Invite and manage members             |
+| `read:webhooks`   | List webhook endpoints and deliveries |
+| `write:webhooks`  | Create and manage webhook endpoints   |
+| `read:billing`    | View subscription and usage           |
+| `read:audit-logs` | Query audit log entries               |
+
+Scope checking uses a deny-by-default model. A key with no scopes is denied access to all resources:
+
+```typescript
+export function hasScope(apiKey: ApiKey, requiredScope: string): boolean {
+  if (!apiKey.scopes || apiKey.scopes.length === 0) {
+    return false;
+  }
+  return apiKey.scopes.includes(requiredScope);
+}
+```
+
+<Info>
+  Grant only the scopes each key needs. A deployment pipeline that only reads project data should
+  not have `write:members` access.
+</Info>
+
+## Authentication
+
+Authenticate API requests by passing the key in the `X-API-Key` header:
+
+```bash
+curl https://api.example.com/api/v1/projects \
+  -H "X-API-Key: bunship_live_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a7b8c9d0e1f2a3b4c5d6a7b8c9d0"
+```
+
+BunShip validates the key by:
+
+<Steps>
+  <Step title="Hashing the provided key">
+    The raw key is hashed with SHA-256 to produce a digest.
+  </Step>
+  <Step title="Looking up the hash">
+    The hash is compared against stored key hashes in the database.
+  </Step>
+  <Step title="Checking key status">
+    The key must be active and not expired.
+    ```typescript
+    if (!apiKey.isActive) {
+      throw new AuthenticationError("API key is inactive");
+    }
+    if (apiKey.expiresAt && apiKey.expiresAt < new Date()) {
+      throw new AuthenticationError("API key has expired");
+    }
+    ```
+  </Step>
+  <Step title="Updating last used timestamp">
+    On successful validation, the `lastUsedAt` field is updated for usage tracking.
+  </Step>
+</Steps>
+
+## Key Rotation
+
+To rotate a key, create a new one, update your application to use it, then revoke the old key:
+
+<Steps>
+  <Step title="Create a new API key">
+    ```bash
+    curl -X POST https://api.example.com/api/v1/api-keys \
+      -H "Authorization: Bearer <token>" \
+      -d '{ "name": "Production Key (rotated)", "scopes": ["read:projects"] }'
+    ```
+  </Step>
+  <Step title="Deploy the new key">
+    Update your application or CI/CD pipeline with the new key.
+  </Step>
+  <Step title="Revoke the old key">
+    ```bash
+    curl -X DELETE https://api.example.com/api/v1/api-keys/<old_key_id> \
+      -H "Authorization: Bearer <token>"
+    ```
+  </Step>
+</Steps>
+
+Revocation is immediate. Any in-flight requests using the old key will fail after revocation.
+
+## Usage Tracking
+
+Each API key tracks when it was last used. Query usage statistics for a specific key:
+
+```bash
+curl https://api.example.com/api/v1/api-keys/<key_id>/usage \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response:**
+
+```json
+{
+  "keyId": "key_abc123",
+  "name": "CI/CD Pipeline",
+  "prefix": "bunship_live_a1b2c3d4",
+  "lastUsedAt": "2025-03-15T14:22:00Z",
+  "createdAt": "2025-03-01T10:00:00Z",
+  "usage": {
+    "requests": 4521,
+    "rateLimit": 1000
+  }
+}
+```
+
+API key actions are also recorded in the [audit log](/features/audit-logs). Every request authenticated with an API key creates an audit entry with `actorType: "api_key"`.
+
+## Security Details
+
+BunShip applies several measures to protect API keys:
+
+<AccordionGroup>
+  <Accordion title="SHA-256 hashing">
+    Keys are hashed with SHA-256 before storage. The database never contains the raw key. Even if the database is compromised, the keys cannot be reversed.
+    ```typescript
+    export async function hashApiKey(key: string): Promise<string> {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(key);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+      return Array.from(new Uint8Array(hashBuffer), (b) =>
+        b.toString(16).padStart(2, "0")
+      ).join("");
+    }
+    ```
+  </Accordion>
+  <Accordion title="Prefix-only display">
+    After creation, the API only shows the key prefix (e.g., `bunship_live_a1b2c3d4`). The full key is never returned again.
+  </Accordion>
+  <Accordion title="Automatic expiration">
+    Keys can be given an expiration date. Expired keys are rejected during validation without any manual intervention.
+  </Accordion>
+  <Accordion title="Rate limiting">
+    Each key can have an individual rate limit. The middleware enforces this alongside global rate limits.
+  </Accordion>
+</AccordionGroup>
+
+## Plan Limits
+
+API key counts are enforced per plan:
+
+| Plan       | Max API keys |
+| ---------- | ------------ |
+| Free       | 1            |
+| Pro        | 10           |
+| Enterprise | 50           |
