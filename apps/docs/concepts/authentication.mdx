@@ -1,0 +1,395 @@
+---
+title: Authentication
+description: "JWT-based auth with refresh tokens and 2FA"
+---
+
+## Overview
+
+BunShip implements a stateful JWT authentication system. Short-lived **access tokens** (15 minutes) authorize API requests, while long-lived **refresh tokens** (7 days) are backed by database sessions that can be individually revoked. Two-factor authentication, account lockout, and API key auth are included out of the box.
+
+## Auth Flow
+
+<Steps>
+  <Step title="Register">
+    The user submits their email, password, and name. BunShip validates the password against strength rules, hashes it with Argon2id, creates the user record, and sends a verification email.
+
+    ```typescript
+    // POST /api/v1/auth/register
+    const { data } = await api.api.v1.auth.register.post({
+      email: "alice@example.com",
+      password: "S3cure!Pass",
+      fullName: "Alice Johnson",
+    });
+    // data.userId is returned
+    ```
+
+  </Step>
+  <Step title="Verify email">
+    The user clicks the link in their verification email. The API marks `emailVerified` with the current timestamp.
+  </Step>
+  <Step title="Login">
+    The user submits their email and password. On success, the API returns an access token, a refresh token, and basic user info.
+
+    ```typescript
+    // POST /api/v1/auth/login
+    const { data } = await api.api.v1.auth.login.post({
+      email: "alice@example.com",
+      password: "S3cure!Pass",
+    });
+
+    // data.accessToken  -- use in Authorization header
+    // data.refreshToken -- store securely, use to get new access tokens
+    // data.expiresIn    -- 900 (seconds)
+    // data.user         -- { id, email, fullName, emailVerified, twoFactorEnabled }
+    ```
+
+  </Step>
+  <Step title="Make authenticated requests">
+    Include the access token in the `Authorization` header of subsequent requests.
+
+    ```bash
+    curl https://api.example.com/api/v1/users/me \
+      -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..."
+    ```
+
+  </Step>
+  <Step title="Refresh when the access token expires">
+    When the access token expires (after 15 minutes), call the refresh endpoint to get a new pair. The old refresh token is rotated -- each refresh token can only be used once.
+
+    ```typescript
+    // POST /api/v1/auth/refresh
+    const { data } = await api.api.v1.auth.refresh.post({
+      refreshToken: storedRefreshToken,
+    });
+    // data.accessToken   -- new token
+    // data.refreshToken  -- new refresh token (old one is invalidated)
+    ```
+
+  </Step>
+</Steps>
+
+## JWT Structure
+
+BunShip uses two separate JWT secrets and the [jose](https://github.com/panva/jose) library for signing and verification.
+
+<Tabs>
+  <Tab title="Access Token">
+    | Field | Value |
+    |-------|-------|
+    | Algorithm | HS256 |
+    | Expiry | 15 minutes |
+    | Secret | `JWT_SECRET` env var (min 32 chars) |
+    | Issuer | `bunship` |
+
+    **Payload:**
+    ```json
+    {
+      "userId": "clx1abc2d0001...",
+      "email": "alice@example.com",
+      "sessionId": "a1b2c3d4e5f6...",
+      "iss": "bunship",
+      "iat": 1705312000,
+      "exp": 1705312900
+    }
+    ```
+
+  </Tab>
+  <Tab title="Refresh Token">
+    | Field | Value |
+    |-------|-------|
+    | Algorithm | HS256 |
+    | Expiry | 7 days |
+    | Secret | `JWT_REFRESH_SECRET` env var (min 32 chars) |
+    | Issuer | `bunship` |
+
+    **Payload:**
+    ```json
+    {
+      "userId": "clx1abc2d0001...",
+      "sessionId": "a1b2c3d4e5f6...",
+      "iss": "bunship",
+      "iat": 1705312000,
+      "exp": 1705916800
+    }
+    ```
+
+  </Tab>
+</Tabs>
+
+<Warning>
+  Use different values for `JWT_SECRET` and `JWT_REFRESH_SECRET`. Generate them with `openssl rand
+  -hex 32`.
+</Warning>
+
+## Session Management
+
+Every login creates a database-backed session record. Sessions store the hashed refresh token, the client's user agent, IP address, and an expiration timestamp.
+
+```typescript
+// packages/database/src/schema/sessions.ts
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  refreshTokenHash: text("refresh_token_hash").notNull().unique(),
+  userAgent: text("user_agent"),
+  ipAddress: text("ip_address"),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  lastUsedAt: integer("last_used_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+```
+
+This gives users visibility into where they are logged in and the ability to revoke specific sessions:
+
+- **List sessions** -- `GET /api/v1/users/sessions`
+- **Revoke one session** -- `DELETE /api/v1/users/sessions/:id`
+- **Revoke all sessions** -- `DELETE /api/v1/users/sessions` (logs out everywhere)
+
+<Note>
+  The maximum number of concurrent sessions per user defaults to **5** and is configurable via
+  `featuresConfig.auth.maxSessionsPerUser`.
+</Note>
+
+## Two-Factor Authentication
+
+BunShip supports TOTP-based two-factor authentication (compatible with Google Authenticator, Authy, 1Password, and similar apps) plus single-use backup codes.
+
+### Setup Flow
+
+<Steps>
+  <Step title="Request 2FA setup">
+    The user provides their current password. The API generates a TOTP secret, a QR code URI, and 10 backup codes.
+
+    ```typescript
+    // POST /api/v1/auth/two-factor/setup
+    const { data } = await api.api.v1.auth["two-factor"].setup.post({
+      password: "S3cure!Pass",
+    });
+    // data.secret      -- base32 TOTP secret
+    // data.qrCode      -- otpauth:// URI for QR code rendering
+    // data.backupCodes  -- array of 10 single-use recovery codes
+    ```
+
+    <Warning>
+      Backup codes are shown **only once**. Instruct users to store them in a safe location.
+    </Warning>
+
+  </Step>
+  <Step title="Verify with a TOTP code">
+    The user enters a 6-digit code from their authenticator app. This confirms the secret was saved correctly and activates 2FA on the account.
+
+    ```typescript
+    // POST /api/v1/auth/two-factor/verify
+    await api.api.v1.auth["two-factor"].verify.post({
+      code: "482910",
+    });
+    ```
+
+  </Step>
+  <Step title="Login now requires a second factor">
+    Subsequent login attempts return a `requiresTwoFactor: true` error if the `twoFactorCode` field is omitted:
+
+    ```typescript
+    // First attempt without 2FA code
+    const { error } = await api.api.v1.auth.login.post({
+      email: "alice@example.com",
+      password: "S3cure!Pass",
+    });
+    // error.message === "Two-factor code required"
+
+    // Second attempt with 2FA code
+    const { data } = await api.api.v1.auth.login.post({
+      email: "alice@example.com",
+      password: "S3cure!Pass",
+      twoFactorCode: "482910",
+    });
+    ```
+
+  </Step>
+</Steps>
+
+### TOTP Parameters
+
+| Parameter     | Value                                            |
+| ------------- | ------------------------------------------------ |
+| Algorithm     | SHA-1                                            |
+| Digits        | 6                                                |
+| Period        | 30 seconds                                       |
+| Window        | 1 step (accepts codes from 30s before and after) |
+| Secret length | 20 bytes, base32 encoded                         |
+
+### Backup Codes
+
+- 10 codes generated per setup
+- Each code is an 8-character hexadecimal string
+- Codes are hashed with SHA-256 before storage (the plaintext is never persisted)
+- Each code can only be used once -- the `usedAt` timestamp is set on consumption
+- Re-running 2FA setup regenerates all backup codes and invalidates the previous set
+
+## Password Policies
+
+BunShip validates password strength at registration and password reset. The rules are defined in `featuresConfig.auth.password`:
+
+| Rule                      | Default      | Configurable |
+| ------------------------- | ------------ | ------------ |
+| Minimum length            | 8 characters | Yes          |
+| Require uppercase letter  | Yes          | Yes          |
+| Require lowercase letter  | Yes          | Yes          |
+| Require number            | Yes          | Yes          |
+| Require special character | No           | Yes          |
+
+Passwords are hashed using **Argon2id** with the following parameters (via Bun's native `Bun.password` API or the argon2 library):
+
+- Memory: 65536 KB
+- Iterations: 3
+- Parallelism: 4
+
+<Note>
+  BunShip never stores plaintext passwords. The `passwordHash` field in the users table contains
+  only the Argon2id hash output.
+</Note>
+
+## Account Lockout
+
+To protect against brute-force attacks, BunShip tracks failed login attempts and temporarily locks accounts.
+
+| Parameter           | Default             |
+| ------------------- | ------------------- |
+| Max failed attempts | 5                   |
+| Lockout duration    | 15 minutes          |
+| Counter reset       | On successful login |
+
+The lockout logic in `auth.service.ts`:
+
+```typescript
+// On failed login
+const attempts = (user.failedLoginAttempts || 0) + 1;
+const updates: Record<string, unknown> = { failedLoginAttempts: attempts };
+
+if (attempts >= 5) {
+  updates.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+}
+await db.update(users).set(updates).where(eq(users.id, user.id));
+
+// On successful login
+await db
+  .update(users)
+  .set({ failedLoginAttempts: 0, lockedUntil: null })
+  .where(eq(users.id, user.id));
+```
+
+<Note>
+  The login endpoint uses constant-time password verification even when the user does not exist,
+  preventing timing-based user enumeration.
+</Note>
+
+## API Key Authentication
+
+API keys provide an alternative to JWT tokens for server-to-server integrations and automated scripts. Keys are scoped to an organization and carry explicit permission scopes.
+
+### How API Keys Work
+
+1. A team member with `api-keys:create` permission generates a key through the API or dashboard
+2. The full key is shown once (format: `bsk_live_...`); only the prefix and hash are stored
+3. The caller includes the key in the `Authorization` header: `Bearer bsk_live_...`
+4. The API resolves the key to an organization and checks that the key's scopes grant the required permission
+
+### Available Scopes
+
+```typescript
+// From packages/config/src/features.ts
+scopes: [
+  "read:projects",
+  "write:projects",
+  "read:members",
+  "write:members",
+  "read:webhooks",
+  "write:webhooks",
+];
+```
+
+### Key Properties
+
+| Property    | Description                                              |
+| ----------- | -------------------------------------------------------- |
+| `name`      | Human-readable label (e.g., "CI/CD Pipeline")            |
+| `keyPrefix` | First 8 characters of the key, stored for identification |
+| `keyHash`   | SHA-256 hash of the full key                             |
+| `scopes`    | Array of granted permission scopes                       |
+| `rateLimit` | Per-key rate limit override (default: 1000 req/min)      |
+| `expiresAt` | Optional expiration timestamp                            |
+| `isActive`  | Can be deactivated without deletion                      |
+
+### Limits
+
+| Parameter                 | Default              |
+| ------------------------- | -------------------- |
+| Max keys per organization | 10                   |
+| Default rate limit        | 1000 requests/minute |
+
+See [API Keys](/features/api-keys) for usage details and the [API Reference](/api-reference/api-keys/create) for endpoint documentation.
+
+## Auth Middleware Reference
+
+BunShip provides two auth middleware variants:
+
+<CodeGroup>
+```typescript Required Auth
+// Throws 401 if no valid token is present
+import { authMiddleware } from "./middleware/auth";
+
+app.use(authMiddleware).get("/protected", ({ user }) => {
+// user is guaranteed to be defined
+return { userId: user.id };
+});
+
+````
+
+```typescript Optional Auth
+// Sets user to null if no token is present (does not throw)
+import { optionalAuthMiddleware } from "./middleware/auth";
+
+app.use(optionalAuthMiddleware).get("/public", ({ user }) => {
+  if (user) {
+    return { greeting: `Hello, ${user.fullName}` };
+  }
+  return { greeting: "Hello, anonymous" };
+});
+````
+
+</CodeGroup>
+
+## Supported Auth Methods
+
+<CardGroup cols={2}>
+  <Card title="Email + Password" icon="envelope">
+    Traditional registration and login with password strength validation and Argon2id hashing.
+  </Card>
+  <Card title="Magic Link" icon="wand-magic-sparkles">
+    Passwordless login via a one-time link sent to the user's email address.
+  </Card>
+  <Card title="Google OAuth" icon="google">
+    Social login with Google. Requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` environment
+    variables.
+  </Card>
+  <Card title="GitHub OAuth" icon="github">
+    Social login with GitHub. Requires `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` environment
+    variables.
+  </Card>
+</CardGroup>
+
+Each method can be toggled independently through `featuresConfig.auth`:
+
+```typescript
+auth: {
+  enableEmailPassword: true,
+  enableMagicLink: true,
+  enableGoogleOAuth: true,
+  enableGithubOAuth: true,
+  enableTwoFactor: true,
+  enableSessionManagement: true,
+  requireEmailVerification: true,
+}
+```

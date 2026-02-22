@@ -1,0 +1,67 @@
+name: Cleanup
+
+on:
+  schedule:
+    # Run every Sunday at 00:00 UTC
+    - cron: "0 0 * * 0"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  packages: write
+
+jobs:
+  cleanup-artifacts:
+    name: Cleanup Old Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Remove old artifacts
+        uses: c-hive/gha-remove-artifacts@v1
+        with:
+          age: "30 days"
+          skip-recent: 5
+
+  cleanup-cache:
+    name: Cleanup Old Caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cleanup old caches
+        run: |
+          gh extension install actions/gh-actions-cache
+
+          echo "Fetching list of cache keys"
+          cacheKeysForPR=$(gh actions-cache list -R $REPO -B $BRANCH | cut -f 1)
+
+          set +e
+          echo "Deleting caches older than 7 days..."
+          for cacheKey in $cacheKeysForPR
+          do
+              gh actions-cache delete $cacheKey -R $REPO -B $BRANCH --confirm
+          done
+          echo "Done"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: main
+
+  cleanup-packages:
+    name: Cleanup Old Package Versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Delete old container images
+        uses: snok/container-retention-policy@v2
+        with:
+          image-names: bunship-api
+          cut-off: 30 days ago UTC
+          keep-at-least: 5
+          account-type: org
+          token: ${{ secrets.GITHUB_TOKEN }}

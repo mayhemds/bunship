@@ -1,0 +1,80 @@
+name: Validate Configuration
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "Makefile"
+  workflow_dispatch:
+
+jobs:
+  validate-workflows:
+    name: Validate GitHub Workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate workflow syntax
+        uses: docker://rhysd/actionlint:latest
+        with:
+          args: -color
+
+  validate-docker:
+    name: Validate Dockerfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+  validate-markdown:
+    name: Validate Markdown
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Lint markdown files
+        uses: DavidAnson/markdownlint-cli2-action@v14
+        with:
+          globs: |
+            **/*.md
+            !node_modules
+            !dist
+
+  validate-yaml:
+    name: Validate YAML
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate YAML files
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: .github/
+          config_data: |
+            extends: default
+            rules:
+              line-length:
+                max: 120
+                level: warning
+              document-start: disable
+              truthy:
+                check-keys: false

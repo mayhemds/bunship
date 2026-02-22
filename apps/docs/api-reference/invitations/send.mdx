@@ -1,0 +1,82 @@
+---
+title: "Send Invitation"
+api: "POST /api/v1/organizations/{orgId}/invitations"
+description: "Invite a user to join the organization"
+---
+
+Sends an email invitation to join the organization with a specified role. The invitation expires after 7 days. Cannot send an invitation if the user is already a member or has a pending invitation. Requires the `invitations:create` permission.
+
+## Auth
+
+<Note>Requires a valid Bearer token with `invitations:create` permission.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Request Body
+
+<ParamField body="email" type="string" required>
+  Email address to invite. Must be a valid email format.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  Role to assign when the invitation is accepted. One of `"admin"`, `"member"`, or `"viewer"`.
+</ParamField>
+
+## Response
+
+<ResponseField name="invitation" type="object">
+  The created invitation object with `id`, `organizationId`, `email`, `role`, `invitedBy`,
+  `expiresAt`, `createdAt`, and `status`.
+</ResponseField>
+
+<ResponseField name="inviteUrl" type="string">
+  URL for the invitee to accept the invitation.
+</ResponseField>
+
+<ResponseExample>
+```json 201
+{
+  "invitation": {
+    "id": "inv_abc123",
+    "organizationId": "org_cld2abc123def456",
+    "email": "newmember@example.com",
+    "role": "member",
+    "invitedBy": {
+      "id": "usr_cld2abc123def456",
+      "email": "owner@example.com",
+      "fullName": "John Doe"
+    },
+    "expiresAt": "2024-01-22T10:00:00Z",
+    "createdAt": "2024-01-15T10:00:00Z",
+    "status": "pending"
+  },
+  "inviteUrl": "https://app.bunship.com/invite/tok_abc123def456..."
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                                                     |
+| ------ | ---------------------- | ------------------------------------------------------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Invalid email address                                                           |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                                                 |
+| `403`  | `AUTHORIZATION_ERROR`  | Insufficient permissions (`invitations:create` required)                        |
+| `404`  | `NOT_FOUND`            | Organization not found                                                          |
+| `409`  | `CONFLICT`             | User is already a member, or a pending invitation already exists for this email |
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/invitations \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "newmember@example.com",
+    "role": "member"
+  }'
+```

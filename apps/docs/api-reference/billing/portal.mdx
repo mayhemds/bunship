@@ -1,0 +1,55 @@
+---
+title: "Billing Portal"
+api: "GET /api/v1/organizations/{orgId}/billing/portal"
+description: "Get a Stripe Customer Portal URL for self-service billing management"
+---
+
+Creates a Stripe Customer Portal session. The portal allows users to manage their subscription, update payment methods, view invoices, and cancel their plan.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Query Parameters
+
+<ParamField query="return_url" type="string">
+  URL to redirect the user back to after leaving the portal. Must match the configured application
+  origin.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Always `true` on success.
+</ResponseField>
+<ResponseField name="data" type="object">
+  <Expandable title="data properties">
+    <ResponseField name="url" type="string">
+      Stripe Customer Portal URL.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": {
+    "url": "https://billing.stripe.com/p/session/bps_abc123..."
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl "https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/billing/portal?return_url=https://app.bunship.com/billing" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

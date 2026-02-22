@@ -1,0 +1,71 @@
+name: Sync Backend to BunShip Pro
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "packages/**"
+      - "docker/**"
+      - "Dockerfile"
+      - "Makefile"
+      - "scripts/**"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bunnyboiler
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Checkout bunship-pro
+        uses: actions/checkout@v4
+        with:
+          repository: mayhemds/bunship-pro-dev
+          ssh-key: ${{ secrets.PRO_REPO_DEPLOY_KEY }}
+          path: target
+
+      - name: Sync backend files
+        run: |
+          # Backend app
+          rsync -av --delete source/apps/api/ target/apps/api/
+
+          # Shared packages (only sync those that exist in source)
+          for pkg in source/packages/*/; do
+            name=$(basename "$pkg")
+            echo "Syncing package: $name"
+            rsync -av --delete "source/packages/$name/" "target/packages/$name/"
+          done
+
+          # Infrastructure
+          if [ -d source/docker ]; then
+            rsync -av --delete source/docker/ target/docker/
+          fi
+          [ -f source/Dockerfile ] && cp source/Dockerfile target/Dockerfile
+          [ -f source/Makefile ] && cp source/Makefile target/Makefile
+
+          # Scripts
+          if [ -d source/scripts ]; then
+            rsync -av --delete source/scripts/ target/scripts/
+          fi
+
+      - name: Push if changed
+        working-directory: target
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git config user.name "BunShip Bot"
+          git config user.email "bot@bunship.com"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No backend changes to sync"
+          else
+            git commit -m "sync: backend update from bunnyboiler
+
+          Source commit: ${SOURCE_SHA}"
+            git push
+          fi

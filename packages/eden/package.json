@@ -1,0 +1,34 @@
+{
+  "name": "@bunship/eden",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Type-safe API client for BunShip using Elysia Eden",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    },
+    "./types": {
+      "import": "./src/types.ts",
+      "types": "./src/types.ts"
+    }
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@elysiajs/eden": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "peerDependencies": {
+    "elysia": "^1.0.0"
+  }
+}

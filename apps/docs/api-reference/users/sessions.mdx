@@ -1,0 +1,120 @@
+---
+title: "Sessions"
+description: "List and revoke user sessions"
+---
+
+Manage active sessions for the authenticated user. Each login creates a new session. Sessions track the user agent and IP address for security visibility.
+
+---
+
+## List Sessions
+
+```
+GET /api/v1/users/me/sessions
+```
+
+<Note>Requires a valid Bearer token.</Note>
+
+Returns all active (non-expired) sessions for the authenticated user, sorted by most recently used.
+
+### Response
+
+<ResponseField name="sessions" type="array">
+  Array of session objects.
+
+  <Expandable title="session properties">
+    <ResponseField name="id" type="string">Session identifier.</ResponseField>
+    <ResponseField name="userAgent" type="string | null">Browser or client user agent string.</ResponseField>
+    <ResponseField name="ipAddress" type="string | null">IP address that created the session.</ResponseField>
+    <ResponseField name="lastUsedAt" type="string">ISO 8601 timestamp of last activity.</ResponseField>
+    <ResponseField name="expiresAt" type="string">ISO 8601 session expiration timestamp.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 session creation timestamp.</ResponseField>
+    <ResponseField name="isCurrent" type="boolean">`true` if this is the session making the request.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="number">
+  Total number of active sessions.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "sessions": [
+    {
+      "id": "ses_abc123def456",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+      "ipAddress": "192.168.1.1",
+      "lastUsedAt": "2024-01-21T09:00:00Z",
+      "expiresAt": "2024-01-28T09:00:00Z",
+      "createdAt": "2024-01-21T08:00:00Z",
+      "isCurrent": true
+    },
+    {
+      "id": "ses_xyz789ghi012",
+      "userAgent": "BunShip-CLI/1.0",
+      "ipAddress": "10.0.0.5",
+      "lastUsedAt": "2024-01-20T15:00:00Z",
+      "expiresAt": "2024-01-27T15:00:00Z",
+      "createdAt": "2024-01-20T12:00:00Z",
+      "isCurrent": false
+    }
+  ],
+  "total": 2
+}
+```
+</ResponseExample>
+
+### Example
+
+```bash
+curl https://api.bunship.com/api/v1/users/me/sessions \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
+
+---
+
+## Revoke Session
+
+```
+DELETE /api/v1/users/me/sessions/{sessionId}
+```
+
+<Note>Requires a valid Bearer token.</Note>
+
+Revokes a specific session, logging out that device. You cannot revoke the current session -- use the [logout endpoint](/api-reference/auth/logout) instead.
+
+### Path Parameters
+
+<ParamField path="sessionId" type="string" required>
+  The ID of the session to revoke.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Session revoked successfully"
+}
+```
+</ResponseExample>
+
+### Errors
+
+| Status | Code                   | Description                                       |
+| ------ | ---------------------- | ------------------------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Cannot revoke the current session                 |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                   |
+| `404`  | `NOT_FOUND`            | Session not found or does not belong to this user |
+
+### Example
+
+```bash
+curl -X DELETE https://api.bunship.com/api/v1/users/me/sessions/ses_xyz789ghi012 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```
