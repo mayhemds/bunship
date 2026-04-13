@@ -1,5 +1,5 @@
 # Build stage
-FROM oven/bun:1.3.7-alpine AS builder
+FROM oven/bun:1.3.12-alpine AS builder
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ RUN rm -rf node_modules && \
     bun install --production --frozen-lockfile
 
 # Production stage
-FROM oven/bun:1.3.7-alpine AS runner
+FROM oven/bun:1.3.12-alpine AS runner
 
 WORKDIR /app
 
