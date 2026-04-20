@@ -1,0 +1,257 @@
+---
+title: "File Uploads"
+description: "S3-compatible file storage"
+---
+
+BunShip provides an S3-compatible file storage service that works with AWS S3, Cloudflare R2, MinIO, and any S3-compatible provider. Files are scoped to organizations with metadata tracked in the database and binary data stored in your chosen object store.
+
+## Upload Flow
+
+Upload a file by passing the binary data along with organization and metadata options:
+
+```typescript
+const file = await storageService.upload(buffer, {
+  organizationId: "org_123",
+  uploadedBy: "user_123",
+  name: "document.pdf",
+  mimeType: "application/pdf",
+  isPublic: false,
+});
+```
+
+**API call:**
+
+```bash
+curl -X POST https://api.example.com/api/v1/files \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@document.pdf" \
+  -F "name=document.pdf" \
+  -F "isPublic=false"
+```
+
+### What happens during upload
+
+<Steps>
+  <Step title="Size validation">
+    The file is checked against `MAX_FILE_SIZE` (default: 50 MB). Empty files are rejected.
+    ```typescript
+    if (fileSize > MAX_FILE_SIZE) {
+      throw new ValidationError(
+        `File size exceeds maximum allowed size of ${MAX_FILE_SIZE} bytes`
+      );
+    }
+    if (fileSize === 0) {
+      throw new ValidationError("File is empty");
+    }
+    ```
+  </Step>
+  <Step title="Filename sanitization">
+    The filename is cleaned to prevent path traversal and restricted to safe characters:
+    ```typescript
+    const safeName = (options.name ?? "file")
+      .replace(/\.\./g, "")               // Remove path traversal
+      .replace(/[^a-zA-Z0-9._-]/g, "_")   // Only safe chars
+      .slice(0, 255);                      // Limit length
+    ```
+  </Step>
+  <Step title="S3 key generation">
+    Files are stored with an organization-scoped key to ensure tenant isolation:
+    ```
+    {organizationId}/{fileId}/{safeName}
+    ```
+  </Step>
+  <Step title="Upload to S3">
+    The file is uploaded with the appropriate MIME type and cache headers.
+    - **Public files**: `Cache-Control: public, max-age=31536000` (1 year)
+    - **Private files**: `Cache-Control: private, no-cache`
+  </Step>
+  <Step title="Database record">
+    A record is created in the `files` table with the file ID, S3 key, bucket, size, MIME type, and metadata.
+  </Step>
+</Steps>
+
+### Response
+
+```json
+{
+  "id": "clx1abc2d3e4f5g6h7i8j9k0",
+  "organizationId": "org_123",
+  "uploadedBy": "user_123",
+  "name": "document.pdf",
+  "key": "org_123/clx1abc2d3e4f5g6h7i8j9k0/document.pdf",
+  "bucket": "bunship-files",
+  "size": 245678,
+  "mimeType": "application/pdf",
+  "isPublic": false,
+  "createdAt": "2025-03-15T10:00:00Z"
+}
+```
+
+## Storage Backends
+
+BunShip uses the AWS SDK `S3Client`, which supports any S3-compatible service. Configure the backend through environment variables:
+
+<Tabs>
+  <Tab title="AWS S3">
+    ```bash
+    AWS_REGION=us-east-1
+    AWS_ACCESS_KEY_ID=AKIA...
+    AWS_SECRET_ACCESS_KEY=...
+    S3_BUCKET=my-app-files
+    ```
+  </Tab>
+  <Tab title="Cloudflare R2">
+    ```bash
+    AWS_ACCESS_KEY_ID=<R2 access key>
+    AWS_SECRET_ACCESS_KEY=<R2 secret key>
+    S3_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
+    S3_BUCKET=my-app-files
+    S3_FORCE_PATH_STYLE=true
+    ```
+  </Tab>
+  <Tab title="MinIO (local dev)">
+    ```bash
+    AWS_ACCESS_KEY_ID=minioadmin
+    AWS_SECRET_ACCESS_KEY=minioadmin
+    S3_ENDPOINT=http://localhost:9000
+    S3_BUCKET=bunship-files
+    S3_FORCE_PATH_STYLE=true
+    ```
+  </Tab>
+</Tabs>
+
+The S3 client is initialized once at startup:
+
+```typescript
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION ?? "us-east-1",
+  credentials: process.env.AWS_ACCESS_KEY_ID
+    ? {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      }
+    : undefined,
+  endpoint: process.env.S3_ENDPOINT,
+  forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
+});
+```
+
+## Presigned URLs
+
+Generate time-limited download URLs for private files. The default expiration is 15 minutes:
+
+```typescript
+const { url, expiresIn, file } = await storageService.getSignedUrl(
+  "file_123",
+  900 // 15 minutes in seconds
+);
+```
+
+**API call:**
+
+```bash
+curl "https://api.example.com/api/v1/files/<file_id>/url?expiresIn=3600" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response:**
+
+```json
+{
+  "url": "https://bunship-files.s3.amazonaws.com/org_123/file_123/document.pdf?X-Amz-...",
+  "expiresIn": 3600,
+  "file": {
+    "id": "file_123",
+    "name": "document.pdf",
+    "mimeType": "application/pdf",
+    "size": 245678
+  }
+}
+```
+
+The URL grants temporary read access without requiring authentication. Expired files return a `404 Not Found` error.
+
+## File Management
+
+### List files
+
+Retrieve files for an organization with optional MIME type filtering and pagination:
+
+```typescript
+const { files, total } = await storageService.list("org_123", {
+  limit: 50,
+  offset: 0,
+  mimeType: "image/", // Matches image/png, image/jpeg, etc.
+});
+```
+
+### Get file metadata
+
+```typescript
+const file = await storageService.get("file_123", "org_123");
+```
+
+Returns the database record without downloading the binary data. Use `getSignedUrl` to generate a download link.
+
+### Delete files
+
+BunShip supports both soft delete and hard delete:
+
+```typescript
+// Soft delete (marks as deleted, keeps in S3)
+await storageService.delete("file_123", "org_123", false);
+
+// Hard delete (removes from S3 and database)
+await storageService.delete("file_123", "org_123", true);
+```
+
+Soft-deleted files are excluded from list queries by default. Pass `includeDeleted: true` to include them.
+
+### Check existence
+
+Verify a file exists in both the database and S3:
+
+```typescript
+const exists = await storageService.exists("file_123", "org_123");
+```
+
+## Path Traversal Protection
+
+Filenames are sanitized before use as S3 keys. The service strips directory traversal sequences and restricts characters:
+
+```typescript
+const safeName = (options.name ?? "file")
+  .replace(/\.\./g, "") // Remove .. sequences
+  .replace(/[^a-zA-Z0-9._-]/g, "_") // Allow only alphanumeric, dots, hyphens, underscores
+  .slice(0, 255); // Truncate to 255 characters
+```
+
+Files are stored under an organization-specific prefix (`{orgId}/{fileId}/{name}`), which prevents one organization from accessing another's files even if a collision were to occur.
+
+## Temporary Files
+
+Upload files with an expiration time for temporary use cases like export downloads or preview links:
+
+```typescript
+const file = await storageService.upload(buffer, {
+  organizationId: "org_123",
+  uploadedBy: "user_123",
+  name: "export-2025-03.csv",
+  mimeType: "text/csv",
+  expiresIn: 3600, // 1 hour
+});
+```
+
+Expired files are automatically cleaned up by the [background jobs](/features/background-jobs) system every 6 hours.
+
+## Configuration
+
+| Variable                | Description                                  | Default            |
+| ----------------------- | -------------------------------------------- | ------------------ |
+| `AWS_REGION`            | AWS region for S3                            | `us-east-1`        |
+| `AWS_ACCESS_KEY_ID`     | S3 access key                                | -                  |
+| `AWS_SECRET_ACCESS_KEY` | S3 secret key                                | -                  |
+| `S3_ENDPOINT`           | Custom S3 endpoint (for R2, MinIO)           | -                  |
+| `S3_BUCKET`             | S3 bucket name                               | `bunship-files`    |
+| `S3_FORCE_PATH_STYLE`   | Use path-style URLs (required for MinIO, R2) | `false`            |
+| `MAX_FILE_SIZE`         | Maximum upload size in bytes                 | `52428800` (50 MB) |

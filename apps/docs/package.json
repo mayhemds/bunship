@@ -1,0 +1,14 @@
+{
+  "name": "@bunship/docs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "mintlify dev",
+    "clean": "rm -rf .mintlify"
+  },
+  "devDependencies": {
+    "mintlify": "^4.0.0",
+    "typescript": "^5.4.0"
+  }
+}

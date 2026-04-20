@@ -1,0 +1,88 @@
+version: "3.9"
+
+# ============================================
+# Test Environment Docker Compose
+# For running integration and E2E tests
+# Usage: docker-compose -f docker-compose.test.yml up --abort-on-container-exit
+# ============================================
+
+services:
+  # ============================================
+  # Test Redis
+  # ============================================
+  redis-test:
+    image: redis:7-alpine
+    container_name: bunship-redis-test
+    ports:
+      - "6380:6379"
+    command: redis-server --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    networks:
+      - test-network
+
+  # ============================================
+  # Test Runner
+  # ============================================
+  test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: builder
+    container_name: bunship-test
+    environment:
+      - NODE_ENV=test
+      - DATABASE_URL=file::memory:?cache=shared
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-test:6379
+      - JWT_SECRET=test-jwt-secret-min-32-chars
+      - JWT_REFRESH_SECRET=test-refresh-secret-min-32-chars
+    depends_on:
+      redis-test:
+        condition: service_healthy
+    command: ["bun", "test"]
+    volumes:
+      - ../apps/api:/app/apps/api:ro
+      - ../packages:/app/packages:ro
+      - test-coverage:/app/coverage
+    networks:
+      - test-network
+
+  # ============================================
+  # Integration Test Runner
+  # ============================================
+  test-integration:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: builder
+    container_name: bunship-test-integration
+    environment:
+      - NODE_ENV=test
+      - DATABASE_URL=file::memory:?cache=shared
+      - REDIS_HOST=redis-test
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-test:6379
+      - JWT_SECRET=test-jwt-secret-min-32-chars
+      - JWT_REFRESH_SECRET=test-refresh-secret-min-32-chars
+    depends_on:
+      redis-test:
+        condition: service_healthy
+    command: ["bun", "run", "test:integration"]
+    volumes:
+      - ../apps/api:/app/apps/api:ro
+      - ../packages:/app/packages:ro
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  test-coverage:
+    driver: local

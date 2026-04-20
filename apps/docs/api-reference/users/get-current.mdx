@@ -1,0 +1,93 @@
+---
+title: "Get Current User"
+api: "GET /api/v1/users/me"
+description: "Retrieve the authenticated user's profile"
+---
+
+Returns the profile information for the currently authenticated user.
+
+## Auth
+
+<Note>Requires a valid Bearer token.</Note>
+
+## Response
+
+<ResponseField name="id" type="string">
+  Unique user identifier.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User's email address.
+</ResponseField>
+
+<ResponseField name="emailVerified" type="string | null">
+  ISO 8601 timestamp of when the email was verified, or `null` if unverified.
+</ResponseField>
+
+<ResponseField name="fullName" type="string | null">
+  User's display name.
+</ResponseField>
+
+<ResponseField name="avatarUrl" type="string | null">
+  URL of the user's avatar image.
+</ResponseField>
+
+<ResponseField name="preferences" type="object">
+  User preferences including `theme` (`"light"`, `"dark"`, `"system"`), `language`, `timezone`, and
+  `notifications` settings.
+</ResponseField>
+
+<ResponseField name="twoFactorEnabled" type="boolean">
+  Whether two-factor authentication is enabled.
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether the account is active.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 account creation timestamp.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 last update timestamp.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "id": "usr_cld2abc123def456",
+  "email": "user@example.com",
+  "emailVerified": "2024-01-15T10:30:00Z",
+  "fullName": "John Doe",
+  "avatarUrl": "https://cdn.bunship.com/avatars/usr_cld2abc123.jpg",
+  "preferences": {
+    "theme": "dark",
+    "language": "en",
+    "timezone": "America/New_York",
+    "notifications": {
+      "email": true,
+      "push": false
+    }
+  },
+  "twoFactorEnabled": false,
+  "isActive": true,
+  "createdAt": "2024-01-15T10:00:00Z",
+  "updatedAt": "2024-01-20T14:30:00Z"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                           |
+| ------ | ---------------------- | ------------------------------------- |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token       |
+| `404`  | `NOT_FOUND`            | User account not found or deactivated |
+
+## Example
+
+```bash
+curl https://api.bunship.com/api/v1/users/me \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

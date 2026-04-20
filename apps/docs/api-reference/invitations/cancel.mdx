@@ -1,0 +1,51 @@
+---
+title: "Cancel Invitation"
+api: "DELETE /api/v1/organizations/{orgId}/invitations/{invitationId}"
+description: "Cancel a pending invitation"
+---
+
+Cancels a pending invitation. Already-accepted invitations cannot be cancelled. Requires the `invitations:delete` permission.
+
+## Auth
+
+<Note>Requires a valid Bearer token with `invitations:delete` permission.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+<ParamField path="invitationId" type="string" required>
+  Invitation identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Invitation cancelled successfully"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                              |
+| ------ | ---------------------- | -------------------------------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Cannot cancel an already-accepted invitation             |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                          |
+| `403`  | `AUTHORIZATION_ERROR`  | Insufficient permissions (`invitations:delete` required) |
+| `404`  | `NOT_FOUND`            | Invitation not found                                     |
+
+## Example
+
+```bash
+curl -X DELETE https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/invitations/inv_abc123 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

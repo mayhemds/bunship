@@ -1,0 +1,93 @@
+# ============================================
+# Docker Ignore - Exclude from build context
+# ============================================
+
+# Node modules (will be installed in container)
+node_modules/
+**/node_modules/
+npm-debug.log
+yarn-error.log
+bun.lockb.bak
+
+# Build artifacts
+dist/
+**/dist/
+build/
+**/build/
+.turbo/
+.next/
+out/
+
+# Environment files (sensitive data)
+.env
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+**/__tests__/
+**/__mocks__/
+coverage/
+.nyc_output/
+
+# Development tools
+.eslintrc.*
+.prettierrc
+.prettierignore
+.editorconfig
+
+# Docker files (avoid recursion)
+docker/
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# Logs
+logs/
+*.log
+
+# Database files (use volumes instead)
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+data/
+postgres-data/
+
+# Cache and temp
+.cache/
+tmp/
+temp/
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Claude project files
+.claude/
+CLAUDE.md

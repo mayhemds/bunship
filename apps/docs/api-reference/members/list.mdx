@@ -1,0 +1,89 @@
+---
+title: "List Members"
+api: "GET /api/v1/organizations/{orgId}/members"
+description: "List all members of an organization"
+---
+
+Returns all members of the organization, including their user profile and role. Requires the `members:read` permission.
+
+## Auth
+
+<Note>Requires a valid Bearer token with `members:read` permission.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="members" type="array">
+  Array of member objects.
+
+  <Expandable title="member properties">
+    <ResponseField name="id" type="string">Membership identifier.</ResponseField>
+    <ResponseField name="userId" type="string">User identifier.</ResponseField>
+    <ResponseField name="organizationId" type="string">Organization identifier.</ResponseField>
+    <ResponseField name="role" type="string">`"owner"`, `"admin"`, `"member"`, or `"viewer"`.</ResponseField>
+    <ResponseField name="user" type="object">
+      Embedded user profile with `id`, `email`, `fullName`, and `avatarUrl`.
+    </ResponseField>
+    <ResponseField name="joinedAt" type="string">ISO 8601 timestamp of when the user joined.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="number">
+  Total number of members.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "members": [
+    {
+      "id": "mbr_abc123",
+      "userId": "usr_cld2abc123def456",
+      "organizationId": "org_cld2abc123def456",
+      "role": "owner",
+      "user": {
+        "id": "usr_cld2abc123def456",
+        "email": "owner@example.com",
+        "fullName": "John Doe",
+        "avatarUrl": "https://cdn.bunship.com/avatars/john.jpg"
+      },
+      "joinedAt": "2024-01-15T10:00:00Z"
+    },
+    {
+      "id": "mbr_def456",
+      "userId": "usr_xyz789ghi012345",
+      "organizationId": "org_cld2abc123def456",
+      "role": "member",
+      "user": {
+        "id": "usr_xyz789ghi012345",
+        "email": "jane@example.com",
+        "fullName": "Jane Smith",
+        "avatarUrl": null
+      },
+      "joinedAt": "2024-02-01T14:30:00Z"
+    }
+  ],
+  "total": 2
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                        |
+| ------ | ---------------------- | -------------------------------------------------- |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                    |
+| `403`  | `AUTHORIZATION_ERROR`  | Insufficient permissions (`members:read` required) |
+| `404`  | `NOT_FOUND`            | Organization not found                             |
+
+## Example
+
+```bash
+curl https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/members \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

@@ -1,0 +1,97 @@
+---
+title: "Create Organization"
+api: "POST /api/v1/organizations"
+description: "Create a new organization"
+---
+
+Creates a new organization. The authenticated user automatically becomes the organization owner with full permissions.
+
+## Auth
+
+<Note>Requires a valid Bearer token.</Note>
+
+## Request Body
+
+<ParamField body="name" type="string" required>
+  Organization display name. Between 1 and 100 characters.
+</ParamField>
+
+<ParamField body="slug" type="string" required>
+  URL-friendly identifier. Lowercase letters, numbers, and hyphens only. Between 3 and 50
+  characters. Must match the pattern `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Organization description. Maximum 500 characters.
+</ParamField>
+
+<ParamField body="logoUrl" type="string">
+  URL of the organization logo image. Must be a valid URI.
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="string">
+  Organization identifier.
+</ResponseField>
+<ResponseField name="name" type="string">
+  Organization name.
+</ResponseField>
+<ResponseField name="slug" type="string">
+  URL slug.
+</ResponseField>
+<ResponseField name="description" type="string | null">
+  Description.
+</ResponseField>
+<ResponseField name="logoUrl" type="string | null">
+  Logo URL.
+</ResponseField>
+<ResponseField name="settings" type="object">
+  Organization settings (branding, features, billing).
+</ResponseField>
+<ResponseField name="createdBy" type="string">
+  User ID of the creator.
+</ResponseField>
+<ResponseField name="createdAt" type="string">
+  ISO 8601 creation timestamp.
+</ResponseField>
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 last update timestamp.
+</ResponseField>
+
+<ResponseExample>
+```json 201
+{
+  "id": "org_cld2abc123def456",
+  "name": "Acme Corp",
+  "slug": "acme-corp",
+  "description": "Building the future of widgets",
+  "logoUrl": "https://cdn.bunship.com/logos/acme.png",
+  "settings": {},
+  "createdBy": "usr_cld2abc123def456",
+  "createdAt": "2024-01-15T10:00:00Z",
+  "updatedAt": "2024-01-15T10:00:00Z"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                    |
+| ------ | ---------------------- | ---------------------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Invalid slug format or missing required fields |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                |
+| `409`  | `CONFLICT`             | Organization slug already exists               |
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/organizations \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Corp",
+    "slug": "acme-corp",
+    "description": "Building the future of widgets"
+  }'
+```

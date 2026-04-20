@@ -1,0 +1,52 @@
+---
+title: "Cancel Subscription"
+api: "POST /api/v1/organizations/{orgId}/billing/cancel"
+description: "Cancel the subscription at the end of the current billing period"
+---
+
+Cancels the organization's subscription. The subscription remains active until the end of the current billing period, then downgrades to the free plan.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Always `true` on success.
+</ResponseField>
+<ResponseField name="data" type="object">
+  <Expandable title="data properties">
+    <ResponseField name="success" type="boolean">
+      Cancellation confirmation.
+    </ResponseField>
+    <ResponseField name="cancelAt" type="string">
+      ISO 8601 timestamp of when the subscription ends.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": {
+    "success": true,
+    "cancelAt": "2024-02-15T10:00:00Z"
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/billing/cancel \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

@@ -1,0 +1,47 @@
+---
+title: "Send Test Event"
+api: "POST /api/v1/organizations/{orgId}/webhooks/{id}/test"
+description: "Send a test webhook event to verify endpoint configuration"
+---
+
+Sends a test webhook event to the specified endpoint. Use this to verify that your endpoint is correctly configured and responding to deliveries.
+
+## Auth
+
+<Note>Requires a valid Bearer token. User must be a member of the organization.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Webhook endpoint identifier.
+</ParamField>
+
+## Response
+
+Returns the delivery result including the response status code from the target endpoint.
+
+<ResponseExample>
+```json 200
+{
+  "success": true,
+  "data": {
+    "id": "del_abc123",
+    "webhookId": "wh_abc123",
+    "event": "test",
+    "statusCode": 200,
+    "deliveredAt": "2024-01-15T10:00:01Z"
+  }
+}
+```
+</ResponseExample>
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/organizations/org_cld2abc123def456/webhooks/wh_abc123/test \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

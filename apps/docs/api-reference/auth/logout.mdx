@@ -1,0 +1,55 @@
+---
+title: "Logout"
+api: "POST /api/v1/auth/logout"
+description: "Revoke the current session or all sessions"
+---
+
+Logs out the user by revoking the current session. Optionally revokes all sessions across devices when `allSessions` is set to `true`.
+
+## Auth
+
+<Note>Requires a valid Bearer token.</Note>
+
+## Request Body
+
+<ParamField body="allSessions" type="boolean" default={false}>
+  Set to `true` to log out from all devices. Defaults to `false` (current session only).
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Logged out successfully"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                     |
+| ------ | ---------------------- | ------------------------------- |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token |
+
+## Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/logout \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{"allSessions": false}'
+```
+
+**Logout from all devices:**
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/logout \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{"allSessions": true}'
+```

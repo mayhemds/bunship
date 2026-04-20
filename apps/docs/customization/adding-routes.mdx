@@ -1,0 +1,540 @@
+---
+title: Adding Routes
+description: "Create new API endpoints with Elysia"
+---
+
+BunShip uses [Elysia](https://elysiajs.com), a TypeScript-first web framework built for Bun. Routes live in `apps/api/src/routes/` and are registered in the main application entry point.
+
+## Elysia Route Anatomy
+
+Every route in BunShip follows the same structure: an HTTP method, a path, a handler function, and an options object for validation and documentation.
+
+```typescript
+import { Elysia, t } from "elysia";
+
+const routes = new Elysia({ prefix: "/example" }).get(
+  "/",
+  async ({ query }) => {
+    // Handler logic
+    return { message: "Hello" };
+  },
+  {
+    // Request validation
+    query: t.Object({
+      search: t.Optional(t.String()),
+    }),
+    // Response schemas (for OpenAPI docs)
+    response: {
+      200: t.Object({ message: t.String() }),
+      400: ErrorResponse,
+    },
+    // OpenAPI metadata
+    detail: {
+      tags: ["Example"],
+      summary: "Get example",
+      description: "Returns an example response",
+      security: [{ bearerAuth: [] }],
+    },
+  }
+);
+```
+
+### Handler Context
+
+Elysia injects context into every handler. The available properties depend on which middleware is applied:
+
+| Property       | Source                   | Description                                        |
+| -------------- | ------------------------ | -------------------------------------------------- |
+| `body`         | Request body             | Parsed and validated request body                  |
+| `query`        | Query string             | Parsed query parameters                            |
+| `params`       | URL path                 | Path parameters (e.g., `:orgId`)                   |
+| `set`          | Elysia                   | Response control (status, headers, redirect)       |
+| `request`      | Elysia                   | Raw Request object                                 |
+| `user`         | `authMiddleware`         | Authenticated user with `id`, `email`, `sessionId` |
+| `organization` | `organizationMiddleware` | Current organization record                        |
+| `membership`   | `organizationMiddleware` | User's membership in the org                       |
+
+## Adding a New Resource
+
+This walkthrough creates a complete CRUD resource: **widgets** scoped to an organization. By the end, you will have list, create, get, update, and delete endpoints.
+
+### Step 1: Create Validation Schemas
+
+Define your request and response schemas in a separate file. BunShip uses TypeBox (Elysia's built-in validation) for compile-time type safety and automatic OpenAPI documentation.
+
+```typescript
+// apps/api/src/routes/widgets/schemas.ts
+import { t } from "elysia";
+
+export const WidgetSchema = t.Object({
+  id: t.String(),
+  name: t.String(),
+  description: t.Nullable(t.String()),
+  status: t.Union([t.Literal("active"), t.Literal("inactive"), t.Literal("archived")]),
+  organizationId: t.String(),
+  createdBy: t.Nullable(t.String()),
+  createdAt: t.String(),
+  updatedAt: t.String(),
+});
+
+export const CreateWidgetSchema = t.Object({
+  name: t.String({ minLength: 1, maxLength: 100 }),
+  description: t.Optional(t.String({ maxLength: 500 })),
+});
+
+export const UpdateWidgetSchema = t.Object({
+  name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+  description: t.Optional(t.String({ maxLength: 500 })),
+  status: t.Optional(t.Union([t.Literal("active"), t.Literal("inactive"), t.Literal("archived")])),
+});
+
+export const WidgetListSchema = t.Object({
+  widgets: t.Array(WidgetSchema),
+  total: t.Number(),
+});
+```
+
+### Step 2: Create the Route File
+
+```typescript
+// apps/api/src/routes/widgets/index.ts
+import { Elysia } from "elysia";
+import { authMiddleware } from "../../middleware/auth";
+import { organizationMiddleware } from "../../middleware/organization";
+import { requirePermission } from "../../middleware/roles";
+import { getDatabase, eq, and, isNull } from "@bunship/database";
+import { widgets } from "@bunship/database/schema";
+import { WidgetSchema, WidgetListSchema, CreateWidgetSchema, UpdateWidgetSchema } from "./schemas";
+import { NotFoundError } from "@bunship/utils";
+
+export const widgetRoutes = new Elysia({
+  prefix: "/organizations/:orgId/widgets",
+  tags: ["Widgets"],
+})
+  .use(authMiddleware)
+
+  // List widgets
+  .get(
+    "/",
+    async ({ organization }) => {
+      const db = getDatabase();
+      const items = await db.query.widgets.findMany({
+        where: and(eq(widgets.organizationId, organization.id), isNull(widgets.deletedAt)),
+        orderBy: (widgets, { desc }) => [desc(widgets.createdAt)],
+      });
+
+      return {
+        widgets: items.map((w) => ({
+          ...w,
+          createdAt: w.createdAt.toISOString(),
+          updatedAt: w.updatedAt.toISOString(),
+        })),
+        total: items.length,
+      };
+    },
+    {
+      beforeHandle: [organizationMiddleware, requirePermission("widgets:read")],
+      response: { 200: WidgetListSchema },
+      detail: {
+        summary: "List widgets",
+        description: "Returns all widgets for the organization",
+        security: [{ bearerAuth: [] }],
+      },
+    }
+  )
+
+  // Create widget
+  .post(
+    "/",
+    async ({ body, organization, user }) => {
+      const db = getDatabase();
+      const [widget] = await db
+        .insert(widgets)
+        .values({
+          name: body.name,
+          description: body.description,
+          organizationId: organization.id,
+          createdBy: user.id,
+        })
+        .returning();
+
+      return {
+        ...widget,
+        createdAt: widget.createdAt.toISOString(),
+        updatedAt: widget.updatedAt.toISOString(),
+      };
+    },
+    {
+      beforeHandle: [organizationMiddleware, requirePermission("widgets:create")],
+      body: CreateWidgetSchema,
+      response: { 201: WidgetSchema },
+      detail: {
+        summary: "Create widget",
+        description: "Creates a new widget in the organization",
+        security: [{ bearerAuth: [] }],
+      },
+    }
+  )
+
+  // Get single widget
+  .get(
+    "/:widgetId",
+    async ({ params, organization }) => {
+      const db = getDatabase();
+      const widget = await db.query.widgets.findFirst({
+        where: and(
+          eq(widgets.id, params.widgetId),
+          eq(widgets.organizationId, organization.id),
+          isNull(widgets.deletedAt)
+        ),
+      });
+
+      if (!widget) throw new NotFoundError("Widget");
+
+      return {
+        ...widget,
+        createdAt: widget.createdAt.toISOString(),
+        updatedAt: widget.updatedAt.toISOString(),
+      };
+    },
+    {
+      beforeHandle: [organizationMiddleware, requirePermission("widgets:read")],
+      response: { 200: WidgetSchema },
+      detail: {
+        summary: "Get widget",
+        description: "Returns a single widget by ID",
+        security: [{ bearerAuth: [] }],
+      },
+    }
+  )
+
+  // Update widget
+  .patch(
+    "/:widgetId",
+    async ({ params, body, organization }) => {
+      const db = getDatabase();
+      const [widget] = await db
+        .update(widgets)
+        .set({
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.description !== undefined && {
+            description: body.description,
+          }),
+          ...(body.status !== undefined && { status: body.status }),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(widgets.id, params.widgetId), eq(widgets.organizationId, organization.id)))
+        .returning();
+
+      if (!widget) throw new NotFoundError("Widget");
+
+      return {
+        ...widget,
+        createdAt: widget.createdAt.toISOString(),
+        updatedAt: widget.updatedAt.toISOString(),
+      };
+    },
+    {
+      beforeHandle: [organizationMiddleware, requirePermission("widgets:update")],
+      body: UpdateWidgetSchema,
+      response: { 200: WidgetSchema },
+      detail: {
+        summary: "Update widget",
+        description: "Updates an existing widget",
+        security: [{ bearerAuth: [] }],
+      },
+    }
+  )
+
+  // Delete widget (soft delete)
+  .delete(
+    "/:widgetId",
+    async ({ params, organization }) => {
+      const db = getDatabase();
+      await db
+        .update(widgets)
+        .set({ deletedAt: new Date() })
+        .where(and(eq(widgets.id, params.widgetId), eq(widgets.organizationId, organization.id)));
+
+      return { message: "Widget deleted" };
+    },
+    {
+      beforeHandle: [organizationMiddleware, requirePermission("widgets:delete")],
+      detail: {
+        summary: "Delete widget",
+        description: "Soft deletes a widget",
+        security: [{ bearerAuth: [] }],
+      },
+    }
+  );
+```
+
+### Step 3: Register the Route
+
+Add your route module to the main application in `apps/api/src/index.ts`:
+
+```typescript
+import { widgetRoutes } from "./routes/widgets";
+
+const app = new Elysia()
+  // ... existing configuration
+  .group(appConfig.api.prefix, (app) =>
+    app
+      .use(healthRoutes)
+      .use(authRoutes)
+      .use(userRoutes)
+      .use(organizationRoutes)
+      .use(widgetRoutes) // Add here
+      .use(adminRoutes)
+  );
+```
+
+Your new endpoints are now live at:
+
+- `GET /api/v1/organizations/:orgId/widgets`
+- `POST /api/v1/organizations/:orgId/widgets`
+- `GET /api/v1/organizations/:orgId/widgets/:widgetId`
+- `PATCH /api/v1/organizations/:orgId/widgets/:widgetId`
+- `DELETE /api/v1/organizations/:orgId/widgets/:widgetId`
+
+## Route Groups and Prefixes
+
+Elysia supports nesting routes with prefixes. BunShip uses this pattern for organization-scoped resources.
+
+### Top-Level Routes
+
+Routes that do not belong to an organization (like auth or user profile):
+
+```typescript
+export const authRoutes = new Elysia({ prefix: "/auth" })
+  .post("/register", handler)
+  .post("/login", handler);
+// Results in: /api/v1/auth/register, /api/v1/auth/login
+```
+
+### Organization-Scoped Routes
+
+Resources that belong to an organization use the `:orgId` parameter:
+
+```typescript
+export const widgetRoutes = new Elysia({
+  prefix: "/organizations/:orgId/widgets",
+})
+  .get("/", listHandler)
+  .post("/", createHandler);
+// Results in: /api/v1/organizations/:orgId/widgets
+```
+
+### Nested Sub-Routes
+
+Mount related routes as sub-routes using `.use()`:
+
+```typescript
+// Parent route file
+export const organizationRoutes = new Elysia({
+  prefix: "/organizations",
+})
+  .use(authMiddleware)
+  .get("/", listOrgsHandler)
+  .post("/", createOrgHandler)
+  .use(memberRoutes) // /organizations/:orgId/members
+  .use(billingRoutes) // /organizations/:orgId/billing
+  .use(widgetRoutes); // /organizations/:orgId/widgets
+```
+
+## Middleware
+
+BunShip provides three middleware layers that you apply to routes as needed.
+
+### Authentication Middleware
+
+Verifies the JWT access token and injects `user` into the handler context:
+
+```typescript
+import { authMiddleware } from "../../middleware/auth";
+
+export const routes = new Elysia().use(authMiddleware).get("/protected", ({ user }) => {
+  // user.id, user.email, user.sessionId are available
+  return { userId: user.id };
+});
+```
+
+### Organization Middleware
+
+Loads the organization from the `:orgId` parameter and verifies the user is a member. Injects `organization` and `membership` into context:
+
+```typescript
+import { organizationMiddleware } from "../../middleware/organization";
+
+.get("/:orgId", ({ organization, membership }) => {
+  return { org: organization.name, role: membership.role };
+}, {
+  beforeHandle: [organizationMiddleware],
+});
+```
+
+### Permission Middleware
+
+Checks that the user's role grants a specific permission:
+
+```typescript
+import { requirePermission, requireAdmin, requireOwner } from "../../middleware/roles";
+
+// Require a specific permission
+.delete("/:widgetId", handler, {
+  beforeHandle: [organizationMiddleware, requirePermission("widgets:delete")],
+})
+
+// Require admin role or higher
+.post("/invite", handler, {
+  beforeHandle: [organizationMiddleware, requireAdmin],
+})
+
+// Require owner role
+.delete("/:orgId", handler, {
+  beforeHandle: [organizationMiddleware, requireOwner],
+})
+```
+
+<Note>
+  Middleware order matters. Always apply `authMiddleware` before `organizationMiddleware`, and
+  `organizationMiddleware` before permission checks.
+</Note>
+
+## OpenAPI Documentation
+
+Elysia generates OpenAPI (Swagger) documentation automatically from your route definitions. BunShip serves this at `/docs` by default.
+
+### Adding Documentation to Routes
+
+Use the `detail` property to describe your endpoints:
+
+```typescript
+.post("/", handler, {
+  body: CreateWidgetSchema,
+  response: {
+    201: WidgetSchema,
+    400: ErrorResponse,
+    401: ErrorResponse,
+    403: ErrorResponse,
+  },
+  detail: {
+    tags: ["Widgets"],           // Groups endpoints in the sidebar
+    summary: "Create widget",    // Short one-line description
+    description: "Creates a new widget in the organization. " +
+      "Requires the widgets:create permission.",
+    security: [{ bearerAuth: [] }], // Shows auth requirement
+  },
+})
+```
+
+### Tags
+
+Tags group related endpoints in the Swagger UI. Use consistent tag names across your route files:
+
+```typescript
+export const widgetRoutes = new Elysia({
+  prefix: "/organizations/:orgId/widgets",
+  tags: ["Widgets"], // Applied to all routes in this group
+});
+```
+
+## TypeBox Validation Schemas
+
+Elysia uses [TypeBox](https://github.com/sinclairzx81/typebox) for request validation and OpenAPI type generation. Here are the patterns used throughout BunShip.
+
+### Common Schema Patterns
+
+```typescript
+import { t } from "elysia";
+
+// Required string with length constraints
+t.String({ minLength: 1, maxLength: 100 });
+
+// Optional field
+t.Optional(t.String({ maxLength: 500 }));
+
+// Nullable field
+t.Nullable(t.String());
+
+// Email validation
+t.String({ format: "email", minLength: 5, maxLength: 255 });
+
+// Enum / union of literals
+t.Union([t.Literal("active"), t.Literal("inactive"), t.Literal("archived")]);
+
+// Regex pattern
+t.String({ pattern: "^[0-9]{6}$" });
+
+// Numeric
+t.Number({ minimum: 0, maximum: 1000 });
+
+// Boolean with default
+t.Boolean({ default: false });
+
+// Array of objects
+t.Array(WidgetSchema);
+
+// Nested object
+t.Object({
+  color: t.Optional(t.String()),
+  size: t.Optional(t.Union([t.Literal("small"), t.Literal("medium"), t.Literal("large")])),
+});
+```
+
+### Adding Examples for API Docs
+
+TypeBox `examples` show up in the Swagger UI as sample values:
+
+```typescript
+export const RegisterSchema = t.Object({
+  email: t.String({
+    format: "email",
+    description: "User email address",
+    examples: ["user@example.com"],
+  }),
+  password: t.String({
+    minLength: 8,
+    description: "Password (minimum 8 characters)",
+    examples: ["SecureP@ssw0rd"],
+  }),
+  fullName: t.String({
+    minLength: 1,
+    description: "User's full name",
+    examples: ["John Doe"],
+  }),
+});
+```
+
+## Updating the Eden Client
+
+After adding new routes, regenerate the type-safe API client so your frontend picks up the new endpoints:
+
+```bash
+bun run eden:generate
+```
+
+Then use the new endpoints with full type inference:
+
+```typescript
+import { createClient } from "@bunship/eden";
+
+const api = createClient("http://localhost:3000");
+
+// Full autocomplete for your new widget routes
+const { data } = await api.api.v1.organizations[":orgId"].widgets.post({
+  name: "My Widget",
+  description: "A useful widget",
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Schema" icon="database" href="/customization/database-schema">
+    Add the database table your new routes need
+  </Card>
+  <Card title="Configuration" icon="gear" href="/customization/configuration">
+    Add permissions and feature flags for your resource
+  </Card>
+</CardGroup>

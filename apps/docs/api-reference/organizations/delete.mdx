@@ -1,0 +1,47 @@
+---
+title: "Delete Organization"
+api: "DELETE /api/v1/organizations/{orgId}"
+description: "Delete an organization (owner only)"
+---
+
+Soft-deletes an organization. Only the organization owner can perform this action. The organization and its data are marked as deleted but retained for a grace period before permanent removal.
+
+## Auth
+
+<Note>Requires a valid Bearer token. Only the organization **owner** can delete it.</Note>
+
+## Path Parameters
+
+<ParamField path="orgId" type="string" required>
+  Organization identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Organization deleted successfully"
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code                   | Description                                           |
+| ------ | ---------------------- | ----------------------------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Organization has active resources preventing deletion |
+| `401`  | `AUTHENTICATION_ERROR` | Missing or invalid Bearer token                       |
+| `403`  | `AUTHORIZATION_ERROR`  | Only the owner can delete the organization            |
+| `404`  | `NOT_FOUND`            | Organization not found                                |
+
+## Example
+
+```bash
+curl -X DELETE https://api.bunship.com/api/v1/organizations/org_cld2abc123def456 \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
+```

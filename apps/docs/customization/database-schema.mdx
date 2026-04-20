@@ -1,0 +1,472 @@
+---
+title: Database Schema
+description: "Modify and extend the database"
+---
+
+BunShip uses [Drizzle ORM](https://orm.drizzle.team) with [Turso](https://turso.tech) (libSQL/SQLite). Schema files live in `packages/database/src/schema/` and define both database structure and TypeScript types in a single source of truth.
+
+## Schema Overview
+
+Each table is defined in its own file. Relations between tables are centralized in `index.ts`.
+
+```
+packages/database/src/schema/
+├── index.ts              # Relations + re-exports
+├── users.ts              # User accounts
+├── sessions.ts           # Auth sessions
+├── verificationTokens.ts # Email/password reset tokens
+├── backupCodes.ts        # 2FA backup codes
+├── organizations.ts      # Multi-tenant orgs
+├── memberships.ts        # User-org memberships
+├── invitations.ts        # Team invites
+├── subscriptions.ts      # Stripe subscriptions
+├── projects.ts           # Example resource
+├── webhooks.ts           # Webhook endpoints
+├── webhookDeliveries.ts  # Webhook delivery logs
+├── apiKeys.ts            # API keys
+├── auditLogs.ts          # Audit trail
+└── files.ts              # File uploads
+```
+
+### How a Schema File Works
+
+Here is the `users` table as a reference for the patterns used throughout the codebase:
+
+```typescript
+// packages/database/src/schema/users.ts
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { createId } from "@paralleldrive/cuid2";
+
+export const users = sqliteTable(
+  "users",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    email: text("email").notNull().unique(),
+    emailVerified: integer("email_verified", { mode: "timestamp" }),
+    passwordHash: text("password_hash"),
+    fullName: text("full_name"),
+    avatarUrl: text("avatar_url"),
+    preferences: text("preferences", { mode: "json" })
+      .$type<{
+        theme?: "light" | "dark" | "system";
+        language?: string;
+        timezone?: string;
+      }>()
+      .$defaultFn(() => ({})),
+    twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).notNull().default(false),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdateFn(() => new Date()),
+    deletedAt: integer("deleted_at", { mode: "timestamp" }),
+  },
+  (table) => ({
+    emailIdx: index("users_email_idx").on(table.email),
+    isActiveIdx: index("users_is_active_idx").on(table.isActive),
+    deletedAtIdx: index("users_deleted_at_idx").on(table.deletedAt),
+  })
+);
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+```
+
+Key patterns to note:
+
+- **CUID2 primary keys** generated with `$defaultFn(() => createId())`
+- **SQLite column modes** for booleans (`{ mode: "boolean" }`), timestamps (`{ mode: "timestamp" }`), and JSON (`{ mode: "json" }`)
+- **Typed JSON columns** with `.$type<YourInterface>()`
+- **Soft deletes** via a `deletedAt` column
+- **Automatic timestamps** with `$defaultFn` and `$onUpdateFn`
+- **Exported types** for both select (`User`) and insert (`NewUser`)
+
+## Adding New Tables
+
+<Steps>
+  <Step title="Create the schema file">
+    Create a new file in `packages/database/src/schema/`:
+
+    ```typescript
+    // packages/database/src/schema/widgets.ts
+    import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+    import { createId } from "@paralleldrive/cuid2";
+    import { organizations } from "./organizations";
+    import { users } from "./users";
+
+    export const widgets = sqliteTable(
+      "widgets",
+      {
+        id: text("id")
+          .primaryKey()
+          .$defaultFn(() => createId()),
+
+        // Foreign keys
+        organizationId: text("organization_id")
+          .notNull()
+          .references(() => organizations.id, { onDelete: "cascade" }),
+        createdBy: text("created_by")
+          .references(() => users.id, { onDelete: "set null" }),
+
+        // Fields
+        name: text("name").notNull(),
+        description: text("description"),
+        status: text("status", {
+          enum: ["active", "inactive", "archived"],
+        })
+          .notNull()
+          .default("active"),
+        settings: text("settings", { mode: "json" })
+          .$type<WidgetSettings>(),
+
+        // Timestamps
+        createdAt: integer("created_at", { mode: "timestamp" })
+          .notNull()
+          .$defaultFn(() => new Date()),
+        updatedAt: integer("updated_at", { mode: "timestamp" })
+          .notNull()
+          .$defaultFn(() => new Date())
+          .$onUpdateFn(() => new Date()),
+        deletedAt: integer("deleted_at", { mode: "timestamp" }),
+      },
+      (table) => ({
+        orgIdIdx: index("widgets_org_id_idx").on(table.organizationId),
+        statusIdx: index("widgets_status_idx").on(table.status),
+      })
+    );
+
+    export interface WidgetSettings {
+      color?: string;
+      size?: "small" | "medium" | "large";
+      enabled?: boolean;
+    }
+
+    export type Widget = typeof widgets.$inferSelect;
+    export type NewWidget = typeof widgets.$inferInsert;
+    ```
+
+  </Step>
+
+  <Step title="Define relations">
+    Add relations to `packages/database/src/schema/index.ts`:
+
+    ```typescript
+    import { widgets } from "./widgets";
+
+    // Add to the file alongside existing relations
+    export const widgetRelations = relations(widgets, ({ one }) => ({
+      organization: one(organizations, {
+        fields: [widgets.organizationId],
+        references: [organizations.id],
+      }),
+      creator: one(users, {
+        fields: [widgets.createdBy],
+        references: [users.id],
+      }),
+    }));
+    ```
+
+    If widgets should appear in organization queries, add a reverse relation to the existing `organizationsRelations`:
+
+    ```typescript
+    export const organizationsRelations = relations(organizations, ({ one, many }) => ({
+      // ... existing relations
+      widgets: many(widgets), // Add this line
+    }));
+    ```
+
+  </Step>
+
+  <Step title="Export the schema">
+    Add the exports to the bottom of `packages/database/src/schema/index.ts`:
+
+    ```typescript
+    export { widgets } from "./widgets";
+    export type { Widget, NewWidget, WidgetSettings } from "./widgets";
+    ```
+
+  </Step>
+
+  <Step title="Generate and apply the migration">
+    ```bash
+    bun run db:generate
+    bun run db:migrate
+    ```
+  </Step>
+</Steps>
+
+## Adding Columns to Existing Tables
+
+To add a column to an existing table, edit the table's schema file directly and then generate a migration.
+
+For example, adding a `bio` field to the `users` table:
+
+```typescript
+// packages/database/src/schema/users.ts
+export const users = sqliteTable("users", {
+  // ... existing columns
+  bio: text("bio"), // Add the new column
+  websiteUrl: text("website_url"),
+});
+```
+
+Then generate and apply:
+
+```bash
+bun run db:generate
+bun run db:migrate
+```
+
+<Warning>
+  When adding columns to tables that already have data, make the column nullable or provide a
+  `.default()` value. A `notNull()` column without a default will fail if the table contains
+  existing rows.
+</Warning>
+
+## Column Types
+
+SQLite has a limited type system. Drizzle maps TypeScript types to SQLite storage using column modes.
+
+### Text Columns
+
+```typescript
+// Plain string
+name: text("name").notNull(),
+
+// Enum (validated at the TypeScript level)
+status: text("status", { enum: ["active", "inactive", "archived"] })
+  .notNull()
+  .default("active"),
+
+// JSON with typed interface
+settings: text("settings", { mode: "json" })
+  .$type<{ color?: string; size?: number }>(),
+```
+
+### Integer Columns
+
+```typescript
+// Plain integer
+count: integer("count").notNull().default(0),
+
+// Boolean (stored as 0/1)
+isActive: integer("is_active", { mode: "boolean" })
+  .notNull()
+  .default(true),
+
+// Timestamp (stored as Unix epoch)
+createdAt: integer("created_at", { mode: "timestamp" })
+  .notNull()
+  .$defaultFn(() => new Date()),
+```
+
+### Default Values
+
+```typescript
+// Static default
+status: text("status").notNull().default("active"),
+count: integer("count").notNull().default(0),
+
+// Dynamic default (runs at insert time)
+id: text("id").primaryKey().$defaultFn(() => createId()),
+createdAt: integer("created_at", { mode: "timestamp" })
+  .$defaultFn(() => new Date()),
+
+// Update hook (runs on every update)
+updatedAt: integer("updated_at", { mode: "timestamp" })
+  .$onUpdateFn(() => new Date()),
+```
+
+## Indexes and Constraints
+
+### Indexes
+
+Define indexes in the third argument to `sqliteTable`:
+
+```typescript
+export const widgets = sqliteTable(
+  "widgets",
+  {
+    /* columns */
+  },
+  (table) => ({
+    // Single-column index
+    orgIdIdx: index("widgets_org_id_idx").on(table.organizationId),
+
+    // Composite index for common query patterns
+    orgStatusIdx: index("widgets_org_status_idx").on(table.organizationId, table.status),
+  })
+);
+```
+
+<Tip>
+  Add indexes on columns you frequently filter or sort by. Foreign key columns (`organizationId`,
+  `createdBy`) and status columns are good candidates.
+</Tip>
+
+### Unique Constraints
+
+```typescript
+// Unique on a single column
+email: text("email").notNull().unique(),
+
+// Unique on the table definition (composite unique)
+slug: text("slug").notNull().unique(),
+```
+
+### Foreign Keys
+
+```typescript
+// Cascade delete: when the parent is deleted, delete the child rows
+organizationId: text("organization_id")
+  .notNull()
+  .references(() => organizations.id, { onDelete: "cascade" }),
+
+// Set null: when the parent is deleted, set this column to null
+createdBy: text("created_by")
+  .references(() => users.id, { onDelete: "set null" }),
+
+// Restrict: prevent deleting the parent if children exist
+createdBy: text("created_by")
+  .notNull()
+  .references(() => users.id, { onDelete: "restrict" }),
+```
+
+## Migrations Workflow
+
+BunShip uses Drizzle Kit for migrations. The workflow is:
+
+1. Edit schema files in `packages/database/src/schema/`
+2. Generate a migration SQL file
+3. Apply the migration to your database
+
+### Generate a Migration
+
+```bash
+bun run db:generate
+```
+
+This compares your schema files against the previous migration state and produces a new SQL migration file in the `migrations/` directory.
+
+### Apply Migrations
+
+```bash
+bun run db:migrate
+```
+
+Runs all pending migrations against the database specified by `DATABASE_URL`.
+
+### Push (Development Shortcut)
+
+During development, you can push schema changes directly without generating migration files:
+
+```bash
+bun run db:push
+```
+
+<Warning>
+  `db:push` modifies the database schema in place without creating migration files. Only use this in
+  local development. For staging and production, always use `db:generate` + `db:migrate` so changes
+  are tracked and reproducible.
+</Warning>
+
+### Inspect Your Database
+
+Open Drizzle Studio to browse your data:
+
+```bash
+bun run db:studio
+```
+
+This launches a web UI at `https://local.drizzle.studio` where you can view tables, run queries, and inspect data.
+
+## Relations and Joins
+
+Drizzle supports relational queries through the `relations()` function, which enables nested data fetching without writing manual joins.
+
+### Defining Relations
+
+```typescript
+import { relations } from "drizzle-orm";
+
+export const widgetRelations = relations(widgets, ({ one, many }) => ({
+  // Many-to-one: each widget belongs to one organization
+  organization: one(organizations, {
+    fields: [widgets.organizationId],
+    references: [organizations.id],
+  }),
+  // Many-to-one: each widget has one creator
+  creator: one(users, {
+    fields: [widgets.createdBy],
+    references: [users.id],
+  }),
+}));
+```
+
+### Querying with Relations
+
+Once relations are defined, use `db.query` to fetch nested data:
+
+```typescript
+const db = getDatabase();
+
+// Fetch widgets with their creator
+const items = await db.query.widgets.findMany({
+  where: eq(widgets.organizationId, orgId),
+  with: {
+    creator: true, // Includes the full user record
+  },
+});
+
+// Fetch a single widget with organization details
+const widget = await db.query.widgets.findFirst({
+  where: eq(widgets.id, widgetId),
+  with: {
+    organization: true,
+    creator: {
+      columns: {
+        id: true,
+        fullName: true,
+        avatarUrl: true,
+      },
+    },
+  },
+});
+```
+
+### Manual Joins
+
+For more control, use Drizzle's SQL-like query builder:
+
+```typescript
+import { eq, and, desc } from "drizzle-orm";
+
+const results = await db
+  .select({
+    widgetId: widgets.id,
+    widgetName: widgets.name,
+    orgName: organizations.name,
+    creatorName: users.fullName,
+  })
+  .from(widgets)
+  .leftJoin(organizations, eq(widgets.organizationId, organizations.id))
+  .leftJoin(users, eq(widgets.createdBy, users.id))
+  .where(and(eq(widgets.organizationId, orgId), isNull(widgets.deletedAt)))
+  .orderBy(desc(widgets.createdAt));
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Adding Routes" icon="route" href="/customization/adding-routes">
+    Build API endpoints that use your new tables
+  </Card>
+  <Card title="Email Templates" icon="envelope" href="/customization/email-templates">
+    Send notifications for your new resources
+  </Card>
+</CardGroup>

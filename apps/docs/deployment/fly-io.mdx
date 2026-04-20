@@ -1,0 +1,381 @@
+---
+title: Fly.io
+description: "Deploy globally with Fly.io"
+---
+
+[Fly.io](https://fly.io) runs your containers on hardware in 30+ regions worldwide. Combined with Turso's edge replicas, BunShip can serve requests with single-digit millisecond database latency from anywhere.
+
+## Prerequisites
+
+- A [Fly.io account](https://fly.io)
+- The Fly CLI (`flyctl`) installed
+- A [Turso](https://turso.tech) account
+- A [Stripe](https://stripe.com) account with live API keys
+
+Install `flyctl`:
+
+```bash
+# macOS
+brew install flyctl
+
+# Linux
+curl -L https://fly.io/install.sh | sh
+
+# Authenticate
+fly auth login
+```
+
+## Create the Fly App
+
+<Steps>
+  <Step title="Launch the app">
+    Run `fly launch` from your project root. This creates a `fly.toml` configuration file.
+
+    ```bash
+    fly launch --no-deploy
+    ```
+
+    When prompted:
+    - Choose an app name (e.g., `bunship-api`)
+    - Select your primary region (e.g., `iad` for Ashburn, Virginia)
+    - Decline the Postgres and Redis add-ons (we will configure them separately)
+
+  </Step>
+  <Step title="Configure fly.toml">
+    Replace the generated `fly.toml` with this configuration:
+
+    ```toml
+    app = "bunship-api"
+    primary_region = "iad"
+
+    [build]
+      dockerfile = "docker/Dockerfile.api"
+
+    [env]
+      NODE_ENV = "production"
+      PORT = "3000"
+
+    [http_service]
+      internal_port = 3000
+      force_https = true
+      auto_stop_machines = "stop"
+      auto_start_machines = true
+      min_machines_running = 1
+
+      [http_service.concurrency]
+        type = "requests"
+        hard_limit = 250
+        soft_limit = 200
+
+    [[http_service.checks]]
+      grace_period = "10s"
+      interval = "30s"
+      method = "GET"
+      path = "/health"
+      timeout = "5s"
+
+    [[vm]]
+      size = "shared-cpu-1x"
+      memory = "512mb"
+      cpu_kind = "shared"
+    ```
+
+  </Step>
+  <Step title="Set secrets">
+    Store sensitive values as Fly secrets. These are encrypted and injected as environment variables at runtime.
+
+    ```bash
+    fly secrets set \
+      API_URL="https://bunship-api.fly.dev" \
+      FRONTEND_URL="https://yourdomain.com" \
+      TURSO_DATABASE_URL="libsql://your-db.turso.io" \
+      TURSO_AUTH_TOKEN="your-turso-token" \
+      JWT_SECRET="$(openssl rand -base64 32)" \
+      JWT_REFRESH_SECRET="$(openssl rand -base64 32)" \
+      REDIS_URL="redis://default:your-password@your-redis-host:6379" \
+      STRIPE_SECRET_KEY="sk_live_xxx" \
+      STRIPE_WEBHOOK_SECRET="whsec_xxx" \
+      RESEND_API_KEY="re_xxx" \
+      EMAIL_FROM="YourApp <noreply@yourdomain.com>"
+    ```
+
+  </Step>
+  <Step title="Deploy">
+    ```bash
+    fly deploy
+    ```
+
+    Fly builds the Docker image remotely using your `Dockerfile.api`, pushes it to its internal registry, and starts the machine. Watch the deploy output for the health check to pass.
+
+  </Step>
+</Steps>
+
+## Deploy the Worker
+
+BunShip's background worker (email sending, webhook delivery, billing sync) runs as a separate Fly app.
+
+<Steps>
+  <Step title="Create a worker app">
+    ```bash
+    fly apps create bunship-worker
+    ```
+  </Step>
+  <Step title="Create fly.worker.toml">
+    ```toml
+    app = "bunship-worker"
+    primary_region = "iad"
+
+    [build]
+      dockerfile = "docker/Dockerfile.api"
+
+    [env]
+      NODE_ENV = "production"
+
+    [processes]
+      worker = "bun run apps/api/src/worker.ts"
+
+    [[vm]]
+      size = "shared-cpu-1x"
+      memory = "512mb"
+      cpu_kind = "shared"
+    ```
+
+    The worker does not expose an HTTP service. It connects to Redis and processes jobs.
+
+  </Step>
+  <Step title="Set the same secrets">
+    ```bash
+    fly secrets set -a bunship-worker \
+      TURSO_DATABASE_URL="libsql://your-db.turso.io" \
+      TURSO_AUTH_TOKEN="your-turso-token" \
+      REDIS_URL="redis://default:your-password@your-redis-host:6379" \
+      JWT_SECRET="same-as-api" \
+      STRIPE_SECRET_KEY="sk_live_xxx" \
+      RESEND_API_KEY="re_xxx" \
+      EMAIL_FROM="YourApp <noreply@yourdomain.com>"
+    ```
+  </Step>
+  <Step title="Deploy the worker">
+    ```bash
+    fly deploy --config fly.worker.toml
+    ```
+  </Step>
+</Steps>
+
+## Turso Integration
+
+Turso and Fly.io work well together because both support edge deployments. Turso can replicate your database to the same regions where your Fly machines run.
+
+### Create Edge Replicas
+
+```bash
+# List available Turso regions
+turso db locations
+
+# Add replicas near your Fly regions
+turso db replicate bunship-prod iad   # US East (Ashburn)
+turso db replicate bunship-prod cdg   # Europe (Paris)
+turso db replicate bunship-prod nrt   # Asia (Tokyo)
+```
+
+Turso automatically routes reads to the nearest replica. Writes go to the primary and replicate to all locations.
+
+### Multi-Region Fly Setup
+
+To deploy your API in multiple regions:
+
+```bash
+# Scale to additional regions
+fly scale count 2 --region iad
+fly scale count 1 --region cdg
+fly scale count 1 --region nrt
+```
+
+Each API instance reads from the nearest Turso replica, cutting response times for users outside your primary region.
+
+## Redis Setup with Upstash
+
+Fly.io integrates with [Upstash](https://upstash.com) for managed Redis. Upstash provides a serverless Redis instance with a REST API and per-request pricing.
+
+<Tabs>
+  <Tab title="Fly Upstash addon">
+    ```bash
+    # Create an Upstash Redis database through Fly
+    fly redis create
+
+    # Follow the prompts to:
+    # - Name the database
+    # - Select a region (match your primary_region)
+    # - Choose a plan
+
+    # Fly automatically sets REDIS_URL on your app
+    ```
+
+  </Tab>
+  <Tab title="Upstash directly">
+    1. Create a database at [console.upstash.com](https://console.upstash.com)
+    2. Select the region closest to your Fly primary region
+    3. Enable TLS
+    4. Copy the Redis URL
+
+    ```bash
+    fly secrets set REDIS_URL="rediss://default:xxx@xxx.upstash.io:6379"
+    ```
+
+    Note the `rediss://` scheme (with double `s`) for TLS connections.
+
+  </Tab>
+</Tabs>
+
+<Warning>
+  BullMQ requires a persistent Redis connection. Make sure your Upstash plan supports persistent
+  connections (not just the REST API). The Pro plan and above include this.
+</Warning>
+
+## Custom Domains
+
+```bash
+# Add a certificate
+fly certs create api.yourdomain.com
+
+# Check certificate status
+fly certs show api.yourdomain.com
+```
+
+Fly returns the IP addresses and CNAME target for your DNS configuration:
+
+```
+Type:  CNAME
+Name:  api
+Value: bunship-api.fly.dev
+
+# Or for apex domains, use A/AAAA records:
+Type:  A
+Value: <fly-ipv4>
+Type:  AAAA
+Value: <fly-ipv6>
+```
+
+After DNS propagates, update `API_URL`:
+
+```bash
+fly secrets set API_URL="https://api.yourdomain.com"
+```
+
+## Scaling and Regions
+
+### Vertical Scaling
+
+Increase machine size for heavier workloads:
+
+```bash
+# Upgrade to a dedicated CPU
+fly scale vm shared-cpu-2x --memory 1024
+
+# Or use performance machines
+fly scale vm performance-1x --memory 2048
+```
+
+### Horizontal Scaling
+
+Add more machines in the same or different regions:
+
+```bash
+# Scale to 3 machines in primary region
+fly scale count 3 --region iad
+
+# Add machines in Europe and Asia
+fly scale count 1 --region cdg
+fly scale count 1 --region nrt
+```
+
+Fly automatically load-balances across machines and routes users to the nearest region via Anycast.
+
+### Autoscaling
+
+The `fly.toml` configuration above includes `auto_stop_machines` and `auto_start_machines`. Machines that receive no traffic stop automatically, and restart when a request arrives. This keeps costs low during off-peak hours while maintaining instant availability.
+
+Set `min_machines_running = 1` to keep at least one machine warm for consistent response times.
+
+## Health Checks
+
+The `fly.toml` includes an HTTP health check:
+
+```toml
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  timeout = "5s"
+```
+
+Fly replaces machines that fail health checks. View machine status with:
+
+```bash
+fly status
+fly machines list
+```
+
+## Continuous Deployment
+
+### GitHub Actions
+
+Add a deploy step to your CI pipeline using the official Fly GitHub Action:
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy API
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy Worker
+        run: flyctl deploy --remote-only --config fly.worker.toml --app bunship-worker
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+```
+
+Generate a deploy token:
+
+```bash
+fly tokens create deploy -x 999999h
+```
+
+Add the token as `FLY_API_TOKEN` in your GitHub repository secrets.
+
+## Monitoring
+
+```bash
+# Live logs
+fly logs
+
+# Logs for a specific machine
+fly logs --instance <machine-id>
+
+# Machine metrics
+fly status
+fly machines list
+```
+
+Fly provides built-in Grafana dashboards at `fly.io/dashboard` with CPU, memory, and network metrics per machine.
+
+For application-level monitoring, configure Sentry:
+
+```bash
+fly secrets set SENTRY_DSN="https://xxx@xxx.ingest.sentry.io/xxx"
+```

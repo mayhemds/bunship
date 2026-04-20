@@ -1,0 +1,178 @@
+---
+title: "Two-Factor Authentication"
+description: "Setup, verify, and disable TOTP-based two-factor authentication"
+---
+
+BunShip supports TOTP-based two-factor authentication (2FA) using authenticator apps such as Google Authenticator, Authy, or 1Password. The setup flow has three steps: initiate setup, scan the QR code, then verify a code to activate.
+
+---
+
+## Setup 2FA
+
+<Note>Requires a valid Bearer token.</Note>
+
+```
+POST /api/v1/auth/two-factor/setup
+```
+
+Generates a TOTP secret, QR code, and backup recovery codes. The user must scan the QR code with an authenticator app and then call the verify endpoint to finalize activation.
+
+### Request Body
+
+<ParamField body="password" type="string" required>
+  Current account password to confirm identity.
+</ParamField>
+
+### Response
+
+<ResponseField name="secret" type="string">
+  TOTP secret string for manual entry into the authenticator app.
+</ResponseField>
+
+<ResponseField name="qrCode" type="string">
+  Base64-encoded data URL of the QR code image.
+</ResponseField>
+
+<ResponseField name="backupCodes" type="string[]">
+  One-time backup codes for account recovery if the authenticator device is lost.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "secret": "JBSWY3DPEHPK3PXP",
+  "qrCode": "data:image/png;base64,iVBORw0KGgo...",
+  "backupCodes": [
+    "a1b2c3d4e5",
+    "f6g7h8i9j0",
+    "k1l2m3n4o5",
+    "p6q7r8s9t0",
+    "u1v2w3x4y5",
+    "z6a7b8c9d0",
+    "e1f2g3h4i5",
+    "j6k7l8m9n0"
+  ]
+}
+```
+</ResponseExample>
+
+### Errors
+
+| Status | Code                   | Description                            |
+| ------ | ---------------------- | -------------------------------------- |
+| `401`  | `AUTHENTICATION_ERROR` | Invalid password                       |
+| `409`  | `CONFLICT`             | 2FA is already enabled on this account |
+
+### Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/two-factor/setup \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{"password": "SecureP@ssw0rd"}'
+```
+
+---
+
+## Verify and Enable 2FA
+
+<Note>Requires a valid Bearer token.</Note>
+
+```
+POST /api/v1/auth/two-factor/verify
+```
+
+Verifies a TOTP code from the authenticator app and permanently enables 2FA on the account. Must be called after the setup endpoint.
+
+### Request Body
+
+<ParamField body="code" type="string" required>
+  6-digit code from the authenticator app. Must be exactly 6 numeric digits.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Two-factor authentication enabled successfully."
+}
+```
+</ResponseExample>
+
+### Errors
+
+| Status | Code                   | Description                                    |
+| ------ | ---------------------- | ---------------------------------------------- |
+| `401`  | `AUTHENTICATION_ERROR` | Invalid TOTP code                              |
+| `404`  | `NOT_FOUND`            | No pending 2FA setup found -- call setup first |
+| `409`  | `CONFLICT`             | 2FA is already active                          |
+
+### Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/two-factor/verify \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{"code": "123456"}'
+```
+
+---
+
+## Disable 2FA
+
+<Note>Requires a valid Bearer token.</Note>
+
+```
+POST /api/v1/auth/two-factor/disable
+```
+
+Disables two-factor authentication. Requires both the current password and a valid TOTP code to confirm the action.
+
+### Request Body
+
+<ParamField body="password" type="string" required>
+  Current account password.
+</ParamField>
+
+<ParamField body="code" type="string" required>
+  Current 6-digit code from the authenticator app. Must be exactly 6 numeric digits.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Two-factor authentication disabled successfully."
+}
+```
+</ResponseExample>
+
+### Errors
+
+| Status | Code                   | Description                        |
+| ------ | ---------------------- | ---------------------------------- |
+| `400`  | `VALIDATION_ERROR`     | Invalid TOTP code                  |
+| `401`  | `AUTHENTICATION_ERROR` | Invalid password                   |
+| `404`  | `NOT_FOUND`            | 2FA is not enabled on this account |
+
+### Example
+
+```bash
+curl -X POST https://api.bunship.com/api/v1/auth/two-factor/disable \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "password": "SecureP@ssw0rd",
+    "code": "123456"
+  }'
+```

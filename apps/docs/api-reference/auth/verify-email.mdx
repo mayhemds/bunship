@@ -1,0 +1,43 @@
+---
+title: "Verify Email"
+api: "GET /api/v1/auth/verify-email/{token}"
+description: "Confirm an email address using the verification token"
+---
+
+Verifies a user's email address using the token sent in the verification email. This endpoint is typically called when the user clicks the link in the email.
+
+## Auth
+
+None required. The verification token in the URL serves as authentication.
+
+## Path Parameters
+
+<ParamField path="token" type="string" required>
+  Email verification token from the verification email.
+</ParamField>
+
+## Response
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+<ResponseExample>
+```json 200
+{
+  "message": "Email verified successfully. You can now login."
+}
+```
+</ResponseExample>
+
+## Errors
+
+| Status | Code               | Description                               |
+| ------ | ------------------ | ----------------------------------------- |
+| `400`  | `VALIDATION_ERROR` | Token is invalid or has already been used |
+
+## Example
+
+```bash
+curl https://api.bunship.com/api/v1/auth/verify-email/vrf_abc123def456
+```

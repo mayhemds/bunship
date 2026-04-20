@@ -1,0 +1,103 @@
+# ============================================
+# BunShip API - Multi-stage Dockerfile
+# Optimized for Bun runtime with security hardening
+# ============================================
+
+# ============================================
+# Stage 1: Base
+# ============================================
+FROM oven/bun:1.3.7-alpine AS base
+
+# Set working directory
+WORKDIR /app
+
+# Install security updates and essential tools
+RUN apk update && apk upgrade && \
+    apk add --no-cache dumb-init && \
+    rm -rf /var/cache/apk/*
+
+# ============================================
+# Stage 2: Dependencies
+# ============================================
+FROM base AS deps
+
+# Copy package files for all workspaces
+COPY package.json bun.lock turbo.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/docs/package.json ./apps/docs/
+COPY packages/config/package.json ./packages/config/
+COPY packages/database/package.json ./packages/database/
+COPY packages/emails/package.json ./packages/emails/
+COPY packages/eden/package.json ./packages/eden/
+COPY packages/utils/package.json ./packages/utils/
+
+# Install production dependencies only
+RUN bun install --frozen-lockfile --production
+
+# ============================================
+# Stage 3: Builder
+# ============================================
+FROM base AS builder
+
+# Copy package files
+COPY package.json bun.lock turbo.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/docs/package.json ./apps/docs/
+COPY packages/config/package.json ./packages/config/
+COPY packages/database/package.json ./packages/database/
+COPY packages/emails/package.json ./packages/emails/
+COPY packages/eden/package.json ./packages/eden/
+COPY packages/utils/package.json ./packages/utils/
+
+# Install all dependencies (including dev dependencies)
+# Clean workspace-level node_modules to prevent COPY conflict with BuildKit
+RUN bun install --frozen-lockfile && rm -rf packages/*/node_modules apps/*/node_modules
+
+# Copy source files
+COPY apps/api ./apps/api
+COPY packages ./packages
+COPY tsconfig.json ./
+
+# Build the application
+RUN bun run build
+
+# ============================================
+# Stage 4: Runner (Production)
+# ============================================
+FROM base AS runner
+
+# Set production environment
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S bunship && \
+    adduser -S bunship -u 1001 -G bunship
+
+# Copy production dependencies from deps stage
+COPY --from=deps --chown=bunship:bunship /app/node_modules ./node_modules
+COPY --from=deps --chown=bunship:bunship /app/package.json ./package.json
+
+# Copy built application from builder stage
+COPY --from=builder --chown=bunship:bunship /app/apps/api/dist ./apps/api/dist
+COPY --from=builder --chown=bunship:bunship /app/apps/api/package.json ./apps/api/package.json
+
+# Copy workspace packages (needed for workspace: references)
+COPY --from=builder --chown=bunship:bunship /app/packages ./packages
+COPY --from=builder --chown=bunship:bunship /app/turbo.json ./turbo.json
+
+# Switch to non-root user
+USER bunship
+
+# Expose application port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD bun fetch http://localhost:3000/health || exit 1
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Run the application
+CMD ["bun", "run", "apps/api/dist/index.js"]
